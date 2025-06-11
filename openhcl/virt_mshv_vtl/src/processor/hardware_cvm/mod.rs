@@ -1488,21 +1488,21 @@ impl<T, B: HardwareIsolatedBacking> hv1_hypercall::TranslateVirtualAddressX64
     }
 }
 
-struct HypercallOverlayAccess<'a> {
+struct CvmVtlProtectAccess<'a> {
     vtl: GuestVtl,
     protector: &'a dyn crate::ProtectIsolatedMemory,
     tlb_access: &'a mut dyn TlbFlushLockAccess,
 }
 
-impl hv1_emulator::hv::VtlProtectHypercallOverlay for HypercallOverlayAccess<'_> {
-    fn change_overlay(&mut self, gpn: u64) {
-        self.protector
-            .change_hypercall_overlay(self.vtl, gpn, self.tlb_access)
+impl hv1_emulator::hv::VtlProtectAccess for CvmVtlProtectAccess<'_> {
+    fn get_permissions(&self, gpn: u64) -> Result<HvMapGpaFlags, HvError> {
+        self.protector.query_vtl_protections(self.vtl, gpn)
     }
 
-    fn disable_overlay(&mut self) {
+    fn set_permissions(&mut self, gpn: u64, perms: HvMapGpaFlags) -> Result<(), HvError> {
         self.protector
-            .disable_hypercall_overlay(self.vtl, self.tlb_access)
+            .change_vtl_protections(self.vtl, &[gpn], perms, self.tlb_access)
+            .map_err(|(e, _)| e)
     }
 }
 
@@ -1527,7 +1527,7 @@ impl<B: HardwareIsolatedBacking> UhProcessor<'_, B> {
         let self_index = self.vp_index();
         let hv = &mut self.backing.cvm_state_mut().hv[vtl];
 
-        let mut access = HypercallOverlayAccess {
+        let mut access = CvmVtlProtectAccess {
             vtl,
             protector: B::cvm_partition_state(self.shared)
                 .isolated_memory_protector

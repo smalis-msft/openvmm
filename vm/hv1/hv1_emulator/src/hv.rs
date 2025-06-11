@@ -10,6 +10,8 @@ use crate::pages::OverlayPage;
 use guestmem::GuestMemory;
 use hv1_structs::VtlArray;
 use hvdef::HV_REFERENCE_TSC_SEQUENCE_INVALID;
+use hvdef::HvError;
+use hvdef::HvMapGpaFlags;
 use hvdef::HvRegisterVpAssistPage;
 use hvdef::HvVpVtlControl;
 use hvdef::HvVtlEntryReason;
@@ -52,14 +54,12 @@ struct GlobalHvState {
 struct MutableHvState {
     #[inspect(hex, with = "|&x| u64::from(x)")]
     hypercall_reg: hvdef::hypercall::MsrHypercallContents,
-    #[inspect(with = "|x| x.is_some()")]
-    hypercall_page: Option<LockedPage>,
+    hypercall_page: ReadOnlyLockedPage,
     #[inspect(hex, with = "|&x| u64::from(x)")]
     guest_os_id: hvdef::hypercall::HvGuestOsId,
     #[inspect(hex, with = "|&x| u64::from(x)")]
     reference_tsc_reg: hvdef::HvRegisterReferenceTsc,
-    #[inspect(with = "|x| x.is_some()")]
-    reference_tsc_page: Option<LockedPage>,
+    reference_tsc_page: ReadOnlyLockedPage,
     tsc_sequence: u32,
 }
 
@@ -67,32 +67,18 @@ impl MutableHvState {
     fn new() -> Self {
         Self {
             hypercall_reg: hvdef::hypercall::MsrHypercallContents::new(),
-            hypercall_page: None,
+            hypercall_page: ReadOnlyLockedPage::default(),
             guest_os_id: hvdef::hypercall::HvGuestOsId::new(),
             reference_tsc_reg: hvdef::HvRegisterReferenceTsc::new(),
-            reference_tsc_page: None,
+            reference_tsc_page: ReadOnlyLockedPage::default(),
             tsc_sequence: 0,
         }
     }
 
-    fn reset(&mut self, overlay_access: &mut dyn VtlProtectHypercallOverlay) {
-        overlay_access.disable_overlay();
-
-        let Self {
-            hypercall_reg,
-            hypercall_page,
-            guest_os_id,
-            reference_tsc_reg,
-            reference_tsc_page,
-            tsc_sequence,
-        } = self;
-
-        *hypercall_reg = hvdef::hypercall::MsrHypercallContents::new();
-        *hypercall_page = None;
-        *guest_os_id = hvdef::hypercall::HvGuestOsId::new();
-        *reference_tsc_reg = hvdef::HvRegisterReferenceTsc::new();
-        *reference_tsc_page = None;
-        *tsc_sequence = 0;
+    fn reset(&mut self, prot_access: &mut dyn VtlProtectAccess) {
+        self.hypercall_page.unmap(prot_access);
+        self.reference_tsc_page.unmap(prot_access);
+        *self = Self::new();
     }
 }
 
@@ -145,9 +131,8 @@ impl<const VTL_COUNT: usize> GlobalHv<VTL_COUNT> {
     }
 
     /// Resets the global (but not per-processor) state.
-    pub fn reset(&self, mut overlay_access: VtlArray<&mut dyn VtlProtectHypercallOverlay, 2>) {
-        for (state, overlay_access) in self.vtl_mutable_state.iter().zip(overlay_access.iter_mut())
-        {
+    pub fn reset(&self, mut prot_access: VtlArray<&mut dyn VtlProtectAccess, 2>) {
+        for (state, overlay_access) in self.vtl_mutable_state.iter().zip(prot_access.iter_mut()) {
             state.lock().reset(*overlay_access);
         }
         // There is no global synic state to reset, since the synic is per-VP.
@@ -236,79 +221,98 @@ impl ProcessorVtlHv {
         Ok(())
     }
 
+    fn msr_write_hypercall_page(
+        &mut self,
+        v: u64,
+        prot_access: &mut dyn VtlProtectAccess,
+    ) -> Result<(), MsrError> {
+        let mut mutable = self.vtl_state.lock();
+
+        if mutable.hypercall_reg.locked() {
+            return Err(MsrError::InvalidAccess);
+        }
+
+        let hc = hvdef::hypercall::MsrHypercallContents::from(v);
+        if hc.reserved_p() != 0 {
+            return Err(MsrError::InvalidAccess);
+        }
+
+        if hc.enable()
+            && (!mutable.hypercall_reg.enable() || hc.gpn() != mutable.hypercall_reg.gpn())
+        {
+            let new_page =
+                mutable
+                    .hypercall_page
+                    .remap(&self.guest_memory, hc.gpn(), prot_access, true)?;
+            self.write_hypercall_page(new_page);
+        } else if !hc.enable() {
+            mutable.hypercall_page.unmap(prot_access);
+        }
+
+        mutable.hypercall_reg = hc;
+        Ok(())
+    }
+
+    fn msr_write_reference_tsc(
+        &mut self,
+        v: u64,
+        prot_access: &mut dyn VtlProtectAccess,
+    ) -> Result<(), MsrError> {
+        let mut mutable = self.vtl_state.lock();
+        let v = hvdef::HvRegisterReferenceTsc::from(v);
+
+        if v.reserved_p() != 0 {
+            return Err(MsrError::InvalidAccess);
+        }
+
+        if v.enable()
+            && (!mutable.reference_tsc_reg.enable() || v.gpn() != mutable.reference_tsc_reg.gpn())
+        {
+            let MutableHvState {
+                reference_tsc_page,
+                tsc_sequence,
+                ..
+            } = &mut *mutable;
+            let new_page =
+                reference_tsc_page.remap(&self.guest_memory, v.gpn(), prot_access, false)?;
+            new_page[..4].atomic_write_obj(&HV_REFERENCE_TSC_SEQUENCE_INVALID);
+
+            if self.partition_state.is_ref_time_backed_by_tsc {
+                // TDX TODO: offset might need to be included
+                let tsc_scale =
+                    (((10_000_000_u128) << 64) / self.partition_state.tsc_frequency as u128) as u64;
+                *tsc_sequence = tsc_sequence.wrapping_add(1);
+                if *tsc_sequence == HV_REFERENCE_TSC_SEQUENCE_INVALID {
+                    *tsc_sequence = tsc_sequence.wrapping_add(1);
+                }
+                let reference_page = hvdef::HvReferenceTscPage {
+                    tsc_sequence: *tsc_sequence,
+                    tsc_scale,
+                    ..FromZeros::new_zeroed()
+                };
+                new_page.atomic_write_obj(&reference_page);
+            }
+        } else if !v.enable() {
+            mutable.reference_tsc_page.unmap(prot_access);
+        }
+
+        mutable.reference_tsc_reg = v;
+        Ok(())
+    }
+
     /// Emulates an MSR write for an HV#1 synthetic MSR.
     pub fn msr_write(
         &mut self,
         n: u32,
         v: u64,
-        overlay_access: &mut dyn VtlProtectHypercallOverlay,
+        prot_access: &mut dyn VtlProtectAccess,
     ) -> Result<(), MsrError> {
         match n {
-            hvdef::HV_X64_MSR_GUEST_OS_ID => {
-                self.msr_write_guest_os_id(v);
-            }
-            hvdef::HV_X64_MSR_HYPERCALL => {
-                let mut mutable = self.vtl_state.lock();
-                if mutable.hypercall_reg.locked() {
-                    return Err(MsrError::InvalidAccess);
-                }
-                let hc = hvdef::hypercall::MsrHypercallContents::from(v);
-                if hc.reserved_p() != 0 {
-                    return Err(MsrError::InvalidAccess);
-                }
-                if hc.enable()
-                    && (!mutable.hypercall_reg.enable() || hc.gpn() != mutable.hypercall_reg.gpn())
-                {
-                    // TODO GUEST VSM: make sure the guest has writable vtl
-                    // permissions to this page and that it's not in shared
-                    // memory.
-                    let new_page = LockedPage::new(&self.guest_memory, hc.gpn())
-                        .map_err(|_| MsrError::InvalidAccess)?;
-                    self.write_hypercall_page(&new_page);
-                    overlay_access.change_overlay(hc.gpn());
-                    mutable.hypercall_page = Some(new_page);
-                } else if !hc.enable() {
-                    overlay_access.disable_overlay();
-                    mutable.hypercall_page = None;
-                }
-                mutable.hypercall_reg = hc;
-            }
+            hvdef::HV_X64_MSR_GUEST_OS_ID => self.msr_write_guest_os_id(v),
+            hvdef::HV_X64_MSR_HYPERCALL => self.msr_write_hypercall_page(v, prot_access)?,
             hvdef::HV_X64_MSR_VP_INDEX => return Err(MsrError::InvalidAccess),
             hvdef::HV_X64_MSR_TIME_REF_COUNT => return Err(MsrError::InvalidAccess),
-            hvdef::HV_X64_MSR_REFERENCE_TSC => {
-                let mut mutable = self.vtl_state.lock();
-                let v = hvdef::HvRegisterReferenceTsc::from(v);
-                if v.reserved_p() != 0 {
-                    return Err(MsrError::InvalidAccess);
-                }
-                if v.enable() && mutable.reference_tsc_reg.gpn() != v.gpn() {
-                    let new_page = LockedPage::new(&self.guest_memory, v.gpn())
-                        .map_err(|_| MsrError::InvalidAccess)?;
-                    new_page[..4].atomic_write_obj(&HV_REFERENCE_TSC_SEQUENCE_INVALID);
-
-                    if self.partition_state.is_ref_time_backed_by_tsc {
-                        // TDX TODO: offset might need to be included
-                        let tsc_scale = (((10_000_000_u128) << 64)
-                            / self.partition_state.tsc_frequency as u128)
-                            as u64;
-                        mutable.tsc_sequence = mutable.tsc_sequence.wrapping_add(1);
-                        if mutable.tsc_sequence == HV_REFERENCE_TSC_SEQUENCE_INVALID {
-                            mutable.tsc_sequence = mutable.tsc_sequence.wrapping_add(1);
-                        }
-                        let reference_page = hvdef::HvReferenceTscPage {
-                            tsc_sequence: mutable.tsc_sequence,
-                            tsc_scale,
-                            ..FromZeros::new_zeroed()
-                        };
-                        new_page.atomic_write_obj(&reference_page);
-                        mutable.reference_tsc_page = Some(new_page);
-                    }
-                } else if !v.enable() {
-                    mutable.reference_tsc_page = None;
-                }
-
-                mutable.reference_tsc_reg = v;
-            }
+            hvdef::HV_X64_MSR_REFERENCE_TSC => self.msr_write_reference_tsc(v, prot_access)?,
             hvdef::HV_X64_MSR_TSC_FREQUENCY => return Err(MsrError::InvalidAccess),
             hvdef::HV_X64_MSR_VP_ASSIST_PAGE => self.msr_write_vp_assist_page(v)?,
             msr @ hvdef::HV_X64_MSR_SCONTROL..=hvdef::HV_X64_MSR_STIMER3_COUNT => {
@@ -501,11 +505,76 @@ const fn hypercall_page(use_vmmcall: bool) -> HypercallPage {
 const AMD_HYPERCALL_PAGE: HypercallPage = hypercall_page(true);
 const INTEL_HYPERCALL_PAGE: HypercallPage = hypercall_page(false);
 
-/// A trait for managing the hypercall code page overlay, including its location
-/// and vtl protections.
-pub trait VtlProtectHypercallOverlay {
-    /// Change the location of the overlay.
-    fn change_overlay(&mut self, gpn: u64);
-    /// Disable the overlay.
-    fn disable_overlay(&mut self);
+/// A trait for managing the vtl protections on pages.
+pub trait VtlProtectAccess {
+    /// Get the access permissions for the given GPN.
+    fn get_permissions(&self, gpn: u64) -> Result<HvMapGpaFlags, HvError>;
+    /// Set the access permissions for the given GPN.
+    fn set_permissions(&mut self, gpn: u64, perms: HvMapGpaFlags) -> Result<(), HvError>;
+}
+
+#[derive(Default, Inspect)]
+#[inspect(transparent)]
+struct ReadOnlyLockedPage(Option<ReadOnlyLockedPageInner>);
+
+#[derive(Inspect)]
+struct ReadOnlyLockedPageInner {
+    gpn: u64,
+    #[inspect(skip)]
+    page: LockedPage,
+    #[inspect(debug)]
+    prev_perms: HvMapGpaFlags,
+}
+
+impl ReadOnlyLockedPage {
+    pub fn remap(
+        &mut self,
+        guest_memory: &GuestMemory,
+        gpn: u64,
+        prot_access: &mut dyn VtlProtectAccess,
+        exec: bool,
+    ) -> Result<&LockedPage, MsrError> {
+        // First check that the requested page is readable and writable.
+        let prev_perms = prot_access
+            .get_permissions(gpn)
+            .map_err(|_| MsrError::InvalidAccess)?;
+        if !(prev_perms.readable() && prev_perms.writable()) {
+            return Err(MsrError::InvalidAccess);
+        }
+
+        // Now set it to the new permissions and lock it for our use.
+        prot_access
+            .set_permissions(
+                gpn,
+                HvMapGpaFlags::new()
+                    .with_readable(true)
+                    .with_user_executable(exec)
+                    .with_kernel_executable(exec),
+            )
+            .map_err(|_| MsrError::InvalidAccess)?;
+        let new_page = LockedPage::new(guest_memory, gpn).map_err(|_| MsrError::InvalidAccess)?;
+
+        // If we got this far without error we can now unset the previous page, if any.
+        self.unmap(prot_access);
+
+        // Store and return the new page.
+        *self = ReadOnlyLockedPage(Some(ReadOnlyLockedPageInner {
+            gpn,
+            page: new_page,
+            prev_perms,
+        }));
+
+        Ok(&self.0.as_ref().unwrap().page)
+    }
+
+    pub fn unmap(&mut self, prot_access: &mut dyn VtlProtectAccess) {
+        if let Some(ReadOnlyLockedPageInner {
+            gpn,
+            prev_perms,
+            page: _,
+        }) = self.0.take()
+        {
+            prot_access.set_permissions(gpn, prev_perms).unwrap();
+        }
+    }
 }

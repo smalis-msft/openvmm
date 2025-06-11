@@ -1449,9 +1449,18 @@ impl VtlPartition {
 }
 
 struct WhpNoVtlProtections;
-impl hv1_emulator::hv::VtlProtectHypercallOverlay for WhpNoVtlProtections {
-    fn change_overlay(&mut self, _gpn: u64) {}
-    fn disable_overlay(&mut self) {}
+impl hv1_emulator::hv::VtlProtectAccess for WhpNoVtlProtections {
+    fn get_permissions(&self, _gpn: u64) -> Result<hvdef::HvMapGpaFlags, hvdef::HvError> {
+        Ok(hvdef::HV_MAP_GPA_PERMISSIONS_ALL)
+    }
+
+    fn set_permissions(
+        &mut self,
+        _gpn: u64,
+        _perms: hvdef::HvMapGpaFlags,
+    ) -> Result<(), hvdef::HvError> {
+        Ok(())
+    }
 }
 
 impl Hv1State {
@@ -1459,8 +1468,7 @@ impl Hv1State {
         match self {
             Hv1State::Emulated(hv) => hv.reset(
                 [
-                    &mut WhpNoVtlProtections
-                        as &mut dyn hv1_emulator::hv::VtlProtectHypercallOverlay,
+                    &mut WhpNoVtlProtections as &mut dyn hv1_emulator::hv::VtlProtectAccess,
                     &mut WhpNoVtlProtections,
                 ]
                 .into(),
