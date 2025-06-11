@@ -294,7 +294,7 @@ impl MemoryAcceptor {
     ) -> Result<(), ApplyVtlProtectionsError> {
         let permissions = GpaVtlPermissions::new(self.isolation, vtl, flags);
 
-        let r = match permissions {
+        match permissions {
             GpaVtlPermissions::Vbs(flags) => {
                 // For VBS-isolated VMs, the permissions apply to all lower
                 // VTLs. Therefore VTL 0 cannot set its own permissions.
@@ -327,16 +327,7 @@ impl MemoryAcceptor {
                         vtl: vtl.into(),
                     })
             }
-        };
-
-        if let Err(e) = &r {
-            tracelimit::error_ratelimited!(
-                CVM_ALLOWED,
-                err = e as &dyn std::error::Error,
-                "failed to apply vtl protections",
-            );
         }
-        r
     }
 }
 
@@ -800,7 +791,7 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
                 .unwrap_or(HV_MAP_GPA_PERMISSIONS_ALL),
             GuestVtl::Vtl1 => HV_MAP_GPA_PERMISSIONS_ALL,
         };
-        
+
         Ok(res)
     }
 
