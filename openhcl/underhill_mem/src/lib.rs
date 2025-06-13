@@ -774,27 +774,6 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         Ok(())
     }
 
-    fn query_vtl_protections(&self, vtl: GuestVtl, gpn: u64) -> Result<HvMapGpaFlags, HvError> {
-        if !self
-            .layout
-            .ram()
-            .iter()
-            .any(|r| r.range.contains_addr(gpn * HV_PAGE_SIZE))
-        {
-            return Err(HvError::OperationDenied);
-        }
-
-        let res = match vtl {
-            GuestVtl::Vtl0 => self
-                .vtl0
-                .query_access_permission(gpn)
-                .unwrap_or(HV_MAP_GPA_PERMISSIONS_ALL),
-            GuestVtl::Vtl1 => HV_MAP_GPA_PERMISSIONS_ALL,
-        };
-
-        Ok(res)
-    }
-
     fn set_vtl1_protections_enabled(&self) {
         self.vtl1_protections_enabled
             .store(true, std::sync::atomic::Ordering::Relaxed);

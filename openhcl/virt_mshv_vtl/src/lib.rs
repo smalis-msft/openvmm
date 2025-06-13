@@ -1414,9 +1414,6 @@ pub trait ProtectIsolatedMemory: Send + Sync {
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), (HvError, usize)>;
 
-    /// Queries the vtl protections on a page of guest memory.
-    fn query_vtl_protections(&self, vtl: GuestVtl, gpn: u64) -> Result<HvMapGpaFlags, HvError>;
-
     /// Alerts the memory protector that vtl 1 is ready to set vtl protections
     /// on lower-vtl memory, and that these protections should be enforced.
     fn set_vtl1_protections_enabled(&self);
