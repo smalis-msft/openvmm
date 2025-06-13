@@ -1531,12 +1531,14 @@ impl hv1_emulator::VtlProtectAccess for CvmVtlProtectAccess<'_> {
         gpn: u64,
         check_perms: HvMapGpaFlags,
         new_perms: Option<HvMapGpaFlags>,
-    ) -> Result<guestmem::LockedPages, HvError> {
-        todo!()
+    ) -> Result<(), HvError> {
+        self.protector
+            .register_overlay_page(self.vtl, gpn, check_perms, new_perms, self.tlb_access)
     }
 
     fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), HvError> {
-        todo!()
+        self.protector
+            .unregister_overlay_page(self.vtl, gpn, self.tlb_access)
     }
 }
 

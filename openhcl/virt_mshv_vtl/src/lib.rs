@@ -1421,6 +1421,26 @@ pub trait ProtectIsolatedMemory: Send + Sync {
     /// Whether VTL 1 is prepared to modify vtl protections on lower-vtl memory,
     /// and therefore whether these protections should be enforced.
     fn vtl1_protections_enabled(&self) -> bool;
+
+    /// Registers a page as an overlay page by first validating it has the
+    /// required permissions, optionally modifying them, then locking them.
+    fn register_overlay_page(
+        &self,
+        vtl: GuestVtl,
+        gpn: u64,
+        check_perms: HvMapGpaFlags,
+        new_perms: Option<HvMapGpaFlags>,
+        tlb_access: &mut dyn TlbFlushLockAccess,
+    ) -> Result<(), HvError>;
+
+    /// Unregisters an overlay page, removing its permission lock and restoring
+    /// the previous permissions.
+    fn unregister_overlay_page(
+        &self,
+        vtl: GuestVtl,
+        gpn: u64,
+        tlb_access: &mut dyn TlbFlushLockAccess,
+    ) -> Result<(), HvError>;
 }
 
 /// Trait for access to TLB flush and lock machinery.
@@ -1720,6 +1740,7 @@ impl<'a> UhProtoPartition<'a> {
                 &params,
                 late_params.cvm_params.unwrap(),
                 &caps,
+                late_params.gm.clone(),
                 guest_vsm_available,
             )?)
         } else {
@@ -1733,6 +1754,7 @@ impl<'a> UhProtoPartition<'a> {
             &params,
             BackingSharedParams {
                 cvm_state,
+                guest_memory: late_params.gm.clone(),
                 #[cfg(guest_arch = "x86_64")]
                 cpuid: &cpuid,
                 hcl: &hcl,
@@ -1877,6 +1899,7 @@ impl UhProtoPartition<'_> {
         params: &UhPartitionNewParams<'_>,
         late_params: CvmLateParams,
         caps: &PartitionCapabilities,
+        guest_memory: VtlArray<GuestMemory, 2>,
         guest_vsm_available: bool,
     ) -> Result<UhCvmPartitionState, Error> {
         use vmcore::reference_time::ReferenceTimeSource;
@@ -1915,6 +1938,7 @@ impl UhProtoPartition<'_> {
             tsc_frequency,
             ref_time,
             is_ref_time_backed_by_tsc: true,
+            guest_memory,
         });
 
         Ok(UhCvmPartitionState {

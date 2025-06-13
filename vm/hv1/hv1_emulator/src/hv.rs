@@ -8,6 +8,7 @@ use super::synic::ProcessorSynic;
 use crate::VtlProtectAccess;
 use crate::pages::LockedPage;
 use crate::pages::OverlayPage;
+use guestmem::GuestMemory;
 use hv1_structs::VtlArray;
 use hvdef::HV_REFERENCE_TSC_SEQUENCE_INVALID;
 use hvdef::HvError;
@@ -37,6 +38,8 @@ pub struct GlobalHv<const VTL_COUNT: usize> {
     vtl_mutable_state: VtlArray<Arc<Mutex<MutableHvState>>, VTL_COUNT>,
     /// The per-vtl synic state.
     pub synic: VtlArray<GlobalSynic, VTL_COUNT>,
+    /// The guest memory accessor for each VTL.
+    guest_memory: VtlArray<GuestMemory, VTL_COUNT>,
 }
 
 #[derive(Inspect)]
@@ -93,6 +96,8 @@ pub struct GlobalHvParams<const VTL_COUNT: usize> {
     /// If true, the reference time is backed by the TSC, with an implicit
     /// offset of zero.
     pub is_ref_time_backed_by_tsc: bool,
+    /// The guest memory accessor for each VTL.
+    pub guest_memory: VtlArray<GuestMemory, VTL_COUNT>,
 }
 
 impl<const VTL_COUNT: usize> GlobalHv<VTL_COUNT> {
@@ -106,7 +111,10 @@ impl<const VTL_COUNT: usize> GlobalHv<VTL_COUNT> {
                 ref_time: params.ref_time,
             }),
             vtl_mutable_state: VtlArray::from_fn(|_| Arc::new(Mutex::new(MutableHvState::new()))),
-            synic: VtlArray::from_fn(|_| GlobalSynic::new(params.max_vp_count)),
+            synic: VtlArray::from_fn(|vtl| {
+                GlobalSynic::new(params.guest_memory[vtl].clone(), params.max_vp_count)
+            }),
+            guest_memory: params.guest_memory,
         }
     }
 
@@ -119,6 +127,7 @@ impl<const VTL_COUNT: usize> GlobalHv<VTL_COUNT> {
             synic: self.synic[vtl].add_vp(vp_index),
             vp_assist_page_reg: Default::default(),
             vp_assist_page: OverlayPage::default(),
+            guest_memory: self.guest_memory[vtl].clone(),
         }
     }
 
@@ -148,6 +157,7 @@ pub struct ProcessorVtlHv {
     #[inspect(skip)]
     partition_state: Arc<GlobalHvState>,
     vtl_state: Arc<Mutex<MutableHvState>>,
+    guest_memory: GuestMemory,
     /// The virtual processor's synic state.
     pub synic: ProcessorSynic,
     #[inspect(hex, with = "|&x| u64::from(x)")]
@@ -167,6 +177,7 @@ impl ProcessorVtlHv {
             vp_index: _,
             partition_state: _,
             vtl_state: _,
+            guest_memory: _,
             synic,
             vp_assist_page_reg,
             vp_assist_page,
@@ -204,7 +215,11 @@ impl ProcessorVtlHv {
                     != self.vp_assist_page_reg.gpa_page_number())
         {
             self.vp_assist_page
-                .remap(new_vp_assist_page_reg.gpa_page_number(), prot_access)
+                .remap(
+                    new_vp_assist_page_reg.gpa_page_number(),
+                    &self.guest_memory,
+                    prot_access,
+                )
                 .map_err(|_| MsrError::InvalidAccess)?
         } else if !new_vp_assist_page_reg.enabled() {
             self.vp_assist_page.unmap(prot_access);
@@ -236,7 +251,7 @@ impl ProcessorVtlHv {
         {
             let new_page = mutable
                 .hypercall_page
-                .remap(hc.gpn(), prot_access, true)
+                .remap(hc.gpn(), &self.guest_memory, prot_access, true)
                 .map_err(|_| MsrError::InvalidAccess)?;
             self.write_hypercall_page(new_page);
         } else if !hc.enable() {
@@ -268,7 +283,7 @@ impl ProcessorVtlHv {
                 ..
             } = &mut *mutable;
             let new_page = reference_tsc_page
-                .remap(v.gpn(), prot_access, false)
+                .remap(v.gpn(), &self.guest_memory, prot_access, false)
                 .map_err(|_| MsrError::InvalidAccess)?;
             new_page[..4].atomic_write_obj(&HV_REFERENCE_TSC_SEQUENCE_INVALID);
 
@@ -515,11 +530,12 @@ impl ReadOnlyLockedPage {
     pub fn remap(
         &mut self,
         gpn: u64,
+        guest_memory: &GuestMemory,
         prot_access: &mut dyn VtlProtectAccess,
         exec: bool,
     ) -> Result<&LockedPage, HvError> {
         // First try to acquire the new page.
-        let new_page = prot_access.check_modify_and_lock_overlay_page(
+        prot_access.check_modify_and_lock_overlay_page(
             gpn,
             HvMapGpaFlags::new().with_readable(true).with_writable(true),
             Some(
@@ -529,6 +545,7 @@ impl ReadOnlyLockedPage {
                     .with_kernel_executable(exec),
             ),
         )?;
+        let new_page = LockedPage::new(gpn, guest_memory).unwrap();
 
         // If we got a new page without error we can now unset the previous page, if any.
         self.unmap(prot_access);
@@ -536,7 +553,7 @@ impl ReadOnlyLockedPage {
         // Store and return the new page.
         *self = ReadOnlyLockedPage(Some(ReadOnlyLockedPageInner {
             gpn,
-            page: LockedPage::new(new_page),
+            page: new_page,
         }));
 
         Ok(&self.0.as_ref().unwrap().page)

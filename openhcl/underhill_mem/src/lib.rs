@@ -851,4 +851,24 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         self.vtl1_protections_enabled
             .load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    fn register_overlay_page(
+        &self,
+        vtl: GuestVtl,
+        gpn: u64,
+        check_perms: HvMapGpaFlags,
+        new_perms: Option<HvMapGpaFlags>,
+        tlb_access: &mut dyn TlbFlushLockAccess,
+    ) -> Result<(), HvError> {
+        todo!()
+    }
+
+    fn unregister_overlay_page(
+        &self,
+        vtl: GuestVtl,
+        gpn: u64,
+        tlb_access: &mut dyn TlbFlushLockAccess,
+    ) -> Result<(), HvError> {
+        todo!()
+    }
 }
