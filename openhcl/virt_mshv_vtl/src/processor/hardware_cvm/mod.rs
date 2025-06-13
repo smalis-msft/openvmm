@@ -443,9 +443,25 @@ impl<T, B: HardwareIsolatedBacking> UhHypercallHandler<'_, '_, T, B> {
                 GuestVtl::Vtl0,
                 HvRegisterVsmVpSecureVtlConfig::from(reg.value.as_u64()),
             ),
-            HvX64RegisterName::VpAssistPage => self.vp.backing.cvm_state_mut().hv[vtl]
-                .msr_write_vp_assist_page(reg.value.as_u64())
-                .map_err(|_| HvError::InvalidRegisterValue),
+            HvX64RegisterName::VpAssistPage => {
+                let self_index = self.vp.vp_index();
+                self.vp.backing.cvm_state_mut().hv[vtl]
+                    .msr_write_vp_assist_page(
+                        reg.value.as_u64(),
+                        &mut CvmVtlProtectAccess {
+                            vtl,
+                            protector: B::cvm_partition_state(self.vp.shared)
+                                .isolated_memory_protector
+                                .as_ref(),
+                            tlb_access: &mut B::tlb_flush_lock_access(
+                                self_index,
+                                self.vp.partition,
+                                self.vp.shared,
+                            ),
+                        },
+                    )
+                    .map_err(|_| HvError::InvalidRegisterValue)
+            }
             virt_msr @ (HvX64RegisterName::Star
             | HvX64RegisterName::Cstar
             | HvX64RegisterName::Lstar
@@ -581,9 +597,24 @@ impl<T, B: HardwareIsolatedBacking> UhHypercallHandler<'_, '_, T, B> {
             | HvX64RegisterName::Stimer2Count
             | HvX64RegisterName::Stimer3Config
             | HvX64RegisterName::Stimer3Count
-            | HvX64RegisterName::VsmVina) => self.vp.backing.cvm_state_mut().hv[vtl]
-                .synic
-                .write_reg(synic_reg.into(), reg.value),
+            | HvX64RegisterName::VsmVina) => {
+                let self_index = self.vp.vp_index();
+                self.vp.backing.cvm_state_mut().hv[vtl].synic.write_reg(
+                    synic_reg.into(),
+                    reg.value,
+                    &mut CvmVtlProtectAccess {
+                        vtl,
+                        protector: B::cvm_partition_state(self.vp.shared)
+                            .isolated_memory_protector
+                            .as_ref(),
+                        tlb_access: &mut B::tlb_flush_lock_access(
+                            self_index,
+                            self.vp.partition,
+                            self.vp.shared,
+                        ),
+                    },
+                )
+            }
             HvX64RegisterName::ApicBase => {
                 // No changes are allowed on this path.
                 let current = self.vp.backing.cvm_state_mut().lapics[vtl]
@@ -1488,21 +1519,24 @@ impl<T, B: HardwareIsolatedBacking> hv1_hypercall::TranslateVirtualAddressX64
     }
 }
 
-struct CvmVtlProtectAccess<'a> {
-    vtl: GuestVtl,
-    protector: &'a dyn crate::ProtectIsolatedMemory,
-    tlb_access: &'a mut dyn TlbFlushLockAccess,
+pub(crate) struct CvmVtlProtectAccess<'a> {
+    pub vtl: GuestVtl,
+    pub protector: &'a dyn crate::ProtectIsolatedMemory,
+    pub tlb_access: &'a mut dyn TlbFlushLockAccess,
 }
 
-impl hv1_emulator::hv::VtlProtectAccess for CvmVtlProtectAccess<'_> {
-    fn get_permissions(&self, gpn: u64) -> Result<HvMapGpaFlags, HvError> {
-        self.protector.query_vtl_protections(self.vtl, gpn)
+impl hv1_emulator::VtlProtectAccess for CvmVtlProtectAccess<'_> {
+    fn check_modify_and_lock_overlay_page(
+        &mut self,
+        gpn: u64,
+        check_perms: HvMapGpaFlags,
+        new_perms: Option<HvMapGpaFlags>,
+    ) -> Result<guestmem::LockedPages, HvError> {
+        todo!()
     }
 
-    fn set_permissions(&mut self, gpn: u64, perms: HvMapGpaFlags) -> Result<(), HvError> {
-        self.protector
-            .change_vtl_protections(self.vtl, &[gpn], perms, self.tlb_access)
-            .map_err(|(e, _)| e)
+    fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), HvError> {
+        todo!()
     }
 }
 
@@ -1532,8 +1566,6 @@ impl<B: HardwareIsolatedBacking> UhProcessor<'_, B> {
             protector: B::cvm_partition_state(self.shared)
                 .isolated_memory_protector
                 .as_ref(),
-            // Don't call the helper method, break out into partial borrows so we
-            // can interact with the hv at the same time.
             tlb_access: &mut B::tlb_flush_lock_access(self_index, self.partition, self.shared),
         };
         let r = hv.msr_write(msr, value, &mut access);
