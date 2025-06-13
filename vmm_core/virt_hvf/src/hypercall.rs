@@ -167,11 +167,11 @@ impl hv1_emulator::VtlProtectAccess for HvfNoVtlProtections {
         _gpn: u64,
         _check_perms: hvdef::HvMapGpaFlags,
         _new_perms: Option<hvdef::HvMapGpaFlags>,
-    ) -> Result<(), hvdef::HvError> {
+    ) -> Result<(), HvError> {
         Ok(())
     }
 
-    fn unlock_overlay_page(&mut self, _gpn: u64) -> Result<(), hvdef::HvError> {
+    fn unlock_overlay_page(&mut self, _gpn: u64) -> Result<(), HvError> {
         Ok(())
     }
 }

@@ -1525,15 +1525,25 @@ pub(crate) struct CvmVtlProtectAccess<'a> {
     pub tlb_access: &'a mut dyn TlbFlushLockAccess,
 }
 
+#[expect(unsafe_code)]
 impl hv1_emulator::VtlProtectAccess for CvmVtlProtectAccess<'_> {
     fn check_modify_and_lock_overlay_page(
         &mut self,
         gpn: u64,
         check_perms: HvMapGpaFlags,
         new_perms: Option<HvMapGpaFlags>,
-    ) -> Result<(), HvError> {
-        self.protector
-            .register_overlay_page(self.vtl, gpn, check_perms, new_perms, self.tlb_access)
+    ) -> Result<hv1_emulator::LockedOverlayPage, HvError> {
+        let ptr = self.protector.register_overlay_page(
+            self.vtl,
+            gpn,
+            check_perms,
+            new_perms,
+            self.tlb_access,
+        )?;
+        // SAFETY: The contract of the page is guaranteed by the contract of
+        // `register_overlay_page`, which ensures that the page is valid and
+        // that the permissions are correct.
+        unsafe { Ok(hv1_emulator::LockedOverlayPage::new(ptr, gpn)) }
     }
 
     fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), HvError> {

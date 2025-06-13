@@ -6,7 +6,6 @@
 use crate::RequestInterrupt;
 use crate::VtlProtectAccess;
 use crate::pages::OverlayPage;
-use guestmem::GuestMemory;
 use hvdef::HV_MESSAGE_SIZE;
 use hvdef::HV_PAGE_SIZE_USIZE;
 use hvdef::HvAllArchRegisterName;
@@ -43,7 +42,6 @@ pub struct ProcessorSynic {
     shared: Arc<RwLock<SharedProcessorState>>,
     #[inspect(debug)]
     vina: HvRegisterVsmVina,
-    guest_memory: GuestMemory,
 }
 
 #[derive(Inspect)]
@@ -124,7 +122,6 @@ impl SharedProcessorState {
 pub struct GlobalSynic {
     #[inspect(iter_by_index)]
     vps: Vec<Arc<RwLock<SharedProcessorState>>>,
-    guest_memory: GuestMemory,
 }
 
 fn sint_interrupt(request: &mut dyn RequestInterrupt, sint: hvdef::HvSynicSint) {
@@ -214,12 +211,11 @@ pub struct SintProxied;
 
 impl GlobalSynic {
     /// Returns a new instance of the synthetic interrupt controller.
-    pub fn new(guest_memory: GuestMemory, max_vp_count: u32) -> Self {
+    pub fn new(max_vp_count: u32) -> Self {
         Self {
             vps: (0..max_vp_count)
                 .map(|_| Arc::new(RwLock::new(SharedProcessorState::new())))
                 .collect(),
-            guest_memory,
         }
     }
 
@@ -269,7 +265,6 @@ impl GlobalSynic {
             timers: array::from_fn(|_| Timer::default()),
             shared,
             vina: HvRegisterVsmVina::new(),
-            guest_memory: self.guest_memory.clone(),
         }
     }
 }
@@ -282,7 +277,6 @@ impl ProcessorSynic {
             timers,
             shared,
             vina,
-            guest_memory: _,
         } = self;
         *sints = SintState::default();
         *timers = array::from_fn(|_| Timer::default());
@@ -358,7 +352,7 @@ impl ProcessorSynic {
         {
             shared
                 .siefp_page
-                .remap(siefp.base_gpn(), &self.guest_memory, prot_access)
+                .remap(siefp.base_gpn(), prot_access)
                 .map_err(|_| MsrError::InvalidAccess)?;
         } else if !siefp.enabled() {
             shared.siefp_page.unmap(prot_access);
@@ -380,7 +374,7 @@ impl ProcessorSynic {
         {
             self.sints
                 .simp_page
-                .remap(simp.base_gpn(), &self.guest_memory, prot_access)
+                .remap(simp.base_gpn(), prot_access)
                 .map_err(|_| MsrError::InvalidAccess)?;
         } else if !simp.enabled() {
             self.sints.simp_page.unmap(prot_access);

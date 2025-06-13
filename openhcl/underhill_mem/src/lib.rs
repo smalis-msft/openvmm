@@ -15,6 +15,7 @@ pub use init::MemoryMappings;
 pub use init::init;
 
 use cvm_tracing::CVM_ALLOWED;
+use guestmem::GuestMemoryAccess;
 use guestmem::PAGE_SIZE;
 use guestmem::ranges::PagedRange;
 use hcl::GuestVtl;
@@ -40,8 +41,10 @@ use memory_range::MemoryRange;
 use parking_lot::Mutex;
 use registrar::RegisterMemory;
 use std::collections::VecDeque;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use thiserror::Error;
 use virt::IsolationType;
 use virt_mshv_vtl::ProtectIsolatedMemory;
@@ -863,6 +866,7 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         Ok(())
     }
 
+    #[expect(unsafe_code)]
     fn register_overlay_page(
         &self,
         vtl: GuestVtl,
@@ -870,7 +874,7 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         check_perms: HvMapGpaFlags,
         new_perms: Option<HvMapGpaFlags>,
         tlb_access: &mut dyn TlbFlushLockAccess,
-    ) -> Result<(), HvError> {
+    ) -> Result<NonNull<[AtomicU8; 4096]>, HvError> {
         let mut inner = self.inner.lock();
 
         // Check that the required permissions are present.
@@ -909,7 +913,15 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         tlb_access.flush(vtl);
         tlb_access.set_wait_for_tlb_locks(vtl);
 
-        Ok(())
+        // SAFETY: We've already verified that the GPN is valid and inbounds.
+        let ptr = unsafe {
+            self.vtl0
+                .mapping()
+                .unwrap()
+                .byte_add(gpn as usize * PAGE_SIZE)
+                .cast()
+        };
+        Ok(ptr)
     }
 
     fn unregister_overlay_page(

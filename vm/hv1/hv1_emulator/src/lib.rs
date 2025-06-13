@@ -12,8 +12,6 @@
 //! [Hypervisor Top Level Functional Specification]:
 //!     <https://learn.microsoft.com/en-us/virtualization/hyper-v-on-windows/tlfs/tlfs>
 
-#![forbid(unsafe_code)]
-
 pub mod cpuid;
 pub mod hv;
 pub mod hypercall;
@@ -21,6 +19,8 @@ pub mod message_queues;
 mod pages;
 pub mod synic;
 pub mod x86;
+
+pub use pages::LockedOverlayPage;
 
 /// Trait for requesting an interrupt.
 pub trait RequestInterrupt {
@@ -46,7 +46,7 @@ pub trait VtlProtectAccess {
         gpn: u64,
         check_perms: hvdef::HvMapGpaFlags,
         new_perms: Option<hvdef::HvMapGpaFlags>,
-    ) -> Result<(), hvdef::HvError>;
+    ) -> Result<LockedOverlayPage, hvdef::HvError>;
 
     /// Unlocks an overlay page by its GPN, restoring its previous permissions.
     fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), hvdef::HvError>;
