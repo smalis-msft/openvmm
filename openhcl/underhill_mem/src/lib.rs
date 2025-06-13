@@ -90,6 +90,14 @@ impl RegisterMemory for MshvVtlWithPolicy {
 #[error("failed to register memory with kernel")]
 struct RegistrationError;
 
+#[derive(Debug, Error)]
+#[error("page already locked")]
+struct AlreadyLockedError;
+
+#[derive(Debug, Error)]
+#[error("page not locked")]
+struct NotLockedError;
+
 /// Currently built for hardware CVMs, which only define permissions for VTL
 /// 0 and VTL 1 to express what those VTLs have access to. If this were to
 /// extend to non-hardware CVMs, those would need to define permissions
@@ -462,6 +470,20 @@ impl HardwareIsolatedMemoryProtector {
 
         Ok(res)
     }
+
+    fn check_gpn_not_locked(&self, vtl: GuestVtl, gpn: u64) -> Result<(), HvError> {
+        let inner = self.inner.lock();
+        let locked_pages = self.vtl0.locked_pages.lock();
+        // Only VTL0 permissions are tracked today.
+        // Overlay pages have special handling, being locked does not prevent that.
+        if vtl == GuestVtl::Vtl0
+            && locked_pages.contains(&gpn)
+            && !inner.overlay_pages[vtl].iter().any(|p| p.gpn == gpn)
+        {
+            return Err(HvError::OperationDenied);
+        }
+        Ok(())
+    }
 }
 
 impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
@@ -485,7 +507,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
                 return Err((HvError::OperationDenied, 0));
             }
 
-            // TODO: Don't allow changing visibility of locked pages.
+            // Validate they're not locked.
+            self.check_gpn_not_locked(vtl, gpn).map_err(|x| (x, 0))?;
 
             // Don't allow overlay pages to be shared.
             if shared && inner.overlay_pages[vtl].iter().any(|p| p.gpn == gpn) {
@@ -818,7 +841,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
                 return Err((HvError::OperationDenied, 0));
             }
 
-            // TODO: Don't allow changing protections of locked pages.
+            // Validate they're not locked.
+            self.check_gpn_not_locked(vtl, gpn).map_err(|x| (x, 0))?;
         }
 
         // Prevent visibility changes while VTL protections are being
@@ -889,7 +913,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
             return Err(HvError::OperationDenied);
         }
 
-        // TODO: Don't allow changing protections of locked pages.
+        // Or a locked page.
+        self.check_gpn_not_locked(vtl, gpn)?;
 
         // Everything's validated, change the permissions.
         if let Some(new_perms) = new_perms {

@@ -4,7 +4,9 @@
 // UNSAFETY: Implementing GuestMemoryAccess.
 #![expect(unsafe_code)]
 
+use crate::AlreadyLockedError;
 use crate::MshvVtlWithPolicy;
+use crate::NotLockedError;
 use crate::RegistrationError;
 use crate::registrar::MemoryRegistrar;
 use guestmem::GuestMemoryAccess;
@@ -133,6 +135,8 @@ pub struct GuestMemoryMapping {
     #[inspect(with = "Option::is_some")]
     permission_bitmaps: Option<PermissionBitmaps>,
     registrar: Option<MemoryRegistrar<MshvVtlWithPolicy>>,
+    #[inspect(with = "|x| inspect::adhoc(|req| inspect::iter_by_index(&*x.lock()).inspect(req))")]
+    pub(crate) locked_pages: Mutex<Vec<u64>>,
 }
 
 /// Bitmap implementation using sparse mapping that can be used to track page
@@ -451,6 +455,7 @@ impl GuestMemoryMappingBuilder {
             valid_memory: self.valid_memory.clone(),
             permission_bitmaps,
             registrar,
+            locked_pages: Mutex::new(Vec::new()),
         })
     }
 }
@@ -574,5 +579,34 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
                 .as_ref()
                 .map(|bitmap| bitmap.access_bitmap())
         }
+    }
+
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+        let mut locked_pages = self.locked_pages.lock();
+        for gpn in gpns {
+            if locked_pages.contains(gpn) {
+                return Err(GuestMemoryBackingError::other(
+                    gpn * PAGE_SIZE as u64,
+                    AlreadyLockedError,
+                ));
+            }
+        }
+        locked_pages.extend_from_slice(gpns);
+        Ok(())
+    }
+
+    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+        let mut locked_pages = self.locked_pages.lock();
+        for gpn in gpns {
+            if let Some(pos) = locked_pages.iter().position(|&x| x == *gpn) {
+                locked_pages.remove(pos);
+            } else {
+                return Err(GuestMemoryBackingError::other(
+                    gpn * PAGE_SIZE as u64,
+                    NotLockedError,
+                ));
+            }
+        }
+        Ok(())
     }
 }
