@@ -1414,14 +1414,6 @@ pub trait ProtectIsolatedMemory: Send + Sync {
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), (HvError, usize)>;
 
-    /// Alerts the memory protector that vtl 1 is ready to set vtl protections
-    /// on lower-vtl memory, and that these protections should be enforced.
-    fn set_vtl1_protections_enabled(&self);
-
-    /// Whether VTL 1 is prepared to modify vtl protections on lower-vtl memory,
-    /// and therefore whether these protections should be enforced.
-    fn vtl1_protections_enabled(&self) -> bool;
-
     /// Registers a page as an overlay page by first validating it has the
     /// required permissions, optionally modifying them, then locking them.
     fn register_overlay_page(
@@ -1441,6 +1433,14 @@ pub trait ProtectIsolatedMemory: Send + Sync {
         gpn: u64,
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), HvError>;
+
+    /// Alerts the memory protector that vtl 1 is ready to set vtl protections
+    /// on lower-vtl memory, and that these protections should be enforced.
+    fn set_vtl1_protections_enabled(&self);
+
+    /// Whether VTL 1 is prepared to modify vtl protections on lower-vtl memory,
+    /// and therefore whether these protections should be enforced.
+    fn vtl1_protections_enabled(&self) -> bool;
 }
 
 /// Trait for access to TLB flush and lock machinery.

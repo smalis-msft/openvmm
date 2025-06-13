@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicU8;
 
 pub(crate) struct LockedPage {
     page: LockedPages,
+    pub gpn: u64,
 }
 
 impl LockedPage {
@@ -29,7 +30,7 @@ impl LockedPage {
             }
         };
         assert!(page.pages().len() == 1);
-        Ok(Self { page })
+        Ok(Self { page, gpn })
     }
 }
 
@@ -45,11 +46,7 @@ impl Deref for LockedPage {
 #[inspect(external_tag)]
 pub(crate) enum OverlayPage {
     Local(#[inspect(skip)] Box<Page>),
-    Mapped {
-        #[inspect(skip)]
-        page: LockedPage,
-        gpn: u64,
-    },
+    Mapped(#[inspect(skip)] LockedPage),
 }
 
 // FUTURE: Technically we should restore the prior contents of a mapped location when we
@@ -71,10 +68,7 @@ impl OverlayPage {
 
         self.unlock_prev_gpn(prot_access);
 
-        *self = OverlayPage::Mapped {
-            page: new_page,
-            gpn: new_gpn,
-        };
+        *self = OverlayPage::Mapped(new_page);
         Ok(())
     }
 
@@ -88,8 +82,8 @@ impl OverlayPage {
     }
 
     fn unlock_prev_gpn(&mut self, prot_access: &mut dyn VtlProtectAccess) {
-        if let Self::Mapped { gpn: prev_gpn, .. } = self {
-            prot_access.unlock_overlay_page(*prev_gpn).unwrap();
+        if let Self::Mapped(page) = self {
+            prot_access.unlock_overlay_page(page.gpn).unwrap();
         }
     }
 }
@@ -100,7 +94,7 @@ impl Deref for OverlayPage {
     fn deref(&self) -> &Self::Target {
         match self {
             OverlayPage::Local(page) => page,
-            OverlayPage::Mapped { page, .. } => page,
+            OverlayPage::Mapped(page) => page,
         }
     }
 }

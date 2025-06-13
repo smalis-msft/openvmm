@@ -451,11 +451,7 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         gpns: &[u64],
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), (HvError, usize)> {
-        let inner: parking_lot::lock_api::MutexGuard<
-            '_,
-            parking_lot::RawMutex,
-            HardwareIsolatedMemoryProtectorInner,
-        > = self.inner.lock();
+        let inner = self.inner.lock();
 
         for &gpn in gpns {
             // Validate the ranges are RAM.
@@ -467,6 +463,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
             {
                 return Err((HvError::OperationDenied, 0));
             }
+
+            // TODO: Don't allow changing visibility of locked pages.
 
             // Don't allow overlay pages to be shared.
             if shared && inner.overlay_pages[vtl].iter().any(|p| p.gpn == gpn) {
@@ -660,8 +658,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
 
         if !shared {
             // Apply vtl protections so that the guest can use them. Any
-            // overlay pages won't be host visible, so just apply
-            // the default protections directly without handling of them.
+            // overlay pages won't be host visible, so just apply the default
+            // protections directly without handling them.
             for &range in &ranges {
                 self.apply_protections(range, GuestVtl::Vtl0, inner.default_vtl_permissions.vtl0)
                     .expect("should be able to apply default protections");
@@ -842,16 +840,6 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         Ok(())
     }
 
-    fn set_vtl1_protections_enabled(&self) {
-        self.vtl1_protections_enabled
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn vtl1_protections_enabled(&self) -> bool {
-        self.vtl1_protections_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     fn register_overlay_page(
         &self,
         vtl: GuestVtl,
@@ -870,5 +858,15 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), HvError> {
         todo!()
+    }
+
+    fn set_vtl1_protections_enabled(&self) {
+        self.vtl1_protections_enabled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn vtl1_protections_enabled(&self) -> bool {
+        self.vtl1_protections_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }

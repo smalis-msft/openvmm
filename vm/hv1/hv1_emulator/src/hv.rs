@@ -77,9 +77,21 @@ impl MutableHvState {
     }
 
     fn reset(&mut self, prot_access: &mut dyn VtlProtectAccess) {
-        self.hypercall_page.unmap(prot_access);
-        self.reference_tsc_page.unmap(prot_access);
-        *self = Self::new();
+        let Self {
+            hypercall_reg,
+            hypercall_page,
+            guest_os_id,
+            reference_tsc_reg,
+            reference_tsc_page,
+            tsc_sequence,
+        } = self;
+
+        *hypercall_reg = hvdef::hypercall::MsrHypercallContents::new();
+        hypercall_page.unmap(prot_access);
+        *guest_os_id = hvdef::hypercall::HvGuestOsId::new();
+        *reference_tsc_reg = hvdef::HvRegisterReferenceTsc::new();
+        reference_tsc_page.unmap(prot_access);
+        *tsc_sequence = 0;
     }
 }
 
@@ -521,7 +533,6 @@ struct ReadOnlyLockedPage(Option<ReadOnlyLockedPageInner>);
 
 #[derive(Inspect)]
 struct ReadOnlyLockedPageInner {
-    gpn: u64,
     #[inspect(skip)]
     page: LockedPage,
 }
@@ -551,17 +562,14 @@ impl ReadOnlyLockedPage {
         self.unmap(prot_access);
 
         // Store and return the new page.
-        *self = ReadOnlyLockedPage(Some(ReadOnlyLockedPageInner {
-            gpn,
-            page: new_page,
-        }));
+        *self = ReadOnlyLockedPage(Some(ReadOnlyLockedPageInner { page: new_page }));
 
         Ok(&self.0.as_ref().unwrap().page)
     }
 
     pub fn unmap(&mut self, prot_access: &mut dyn VtlProtectAccess) {
-        if let Some(ReadOnlyLockedPageInner { gpn, page: _ }) = self.0.take() {
-            prot_access.unlock_overlay_page(gpn).unwrap();
+        if let Some(ReadOnlyLockedPageInner { page }) = self.0.take() {
+            prot_access.unlock_overlay_page(page.gpn).unwrap();
         }
     }
 }
