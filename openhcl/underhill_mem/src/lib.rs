@@ -441,6 +441,27 @@ impl HardwareIsolatedMemoryProtector {
         }
         self.acceptor.apply_protections(range, vtl, protections)
     }
+
+    fn query_protections(&self, vtl: GuestVtl, gpn: u64) -> Result<HvMapGpaFlags, HvError> {
+        if !self
+            .layout
+            .ram()
+            .iter()
+            .any(|r| r.range.contains_addr(gpn * HV_PAGE_SIZE))
+        {
+            return Err(HvError::OperationDenied);
+        }
+
+        let res = match vtl {
+            GuestVtl::Vtl0 => self
+                .vtl0
+                .query_access_permission(gpn)
+                .unwrap_or(HV_MAP_GPA_PERMISSIONS_ALL),
+            GuestVtl::Vtl1 => HV_MAP_GPA_PERMISSIONS_ALL,
+        };
+
+        Ok(res)
+    }
 }
 
 impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
@@ -796,6 +817,8 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
             {
                 return Err((HvError::OperationDenied, 0));
             }
+
+            // TODO: Don't allow changing protections of locked pages.
         }
 
         // Prevent visibility changes while VTL protections are being
@@ -848,7 +871,45 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         new_perms: Option<HvMapGpaFlags>,
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), HvError> {
-        todo!()
+        let mut inner = self.inner.lock();
+
+        // Check that the required permissions are present.
+        let current_perms = self.query_protections(vtl, gpn)?;
+        if current_perms.into_bits() | check_perms.into_bits() != current_perms.into_bits() {
+            return Err(HvError::OperationDenied);
+        }
+
+        // Protections cannot be applied to a host-visible page.
+        if inner.valid_shared.check_valid(gpn) {
+            return Err(HvError::OperationDenied);
+        }
+
+        // TODO: Don't allow changing protections of locked pages.
+
+        // Everything's validated, change the permissions.
+        if let Some(new_perms) = new_perms {
+            self.apply_protections(MemoryRange::from_4k_gpn_range(gpn..gpn + 1), vtl, new_perms)
+                .map_err(|_| HvError::OperationDenied)?;
+        }
+
+        // Nothing from this point on can fail, so we can safely register the overlay page.
+        inner.overlay_pages[vtl].push(OverlayPage {
+            gpn,
+            previous_permissions: current_perms,
+        });
+
+        // Flush any threads accessing pages that had their VTL protections
+        // changed.
+        guestmem::rcu().synchronize_blocking();
+
+        // Since page protections were modified, we must invalidate the TLB to
+        // ensure that the new permissions are observed, and wait for other CPUs
+        // to release all guest mappings before declaring that the VTL
+        // protection change has completed.
+        tlb_access.flush(vtl);
+        tlb_access.set_wait_for_tlb_locks(vtl);
+
+        Ok(())
     }
 
     fn unregister_overlay_page(
@@ -857,7 +918,37 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
         gpn: u64,
         tlb_access: &mut dyn TlbFlushLockAccess,
     ) -> Result<(), HvError> {
-        todo!()
+        let mut inner = self.inner.lock();
+        let overlay_pages = &mut inner.overlay_pages[vtl];
+
+        // Find the overlay page.
+        let index = overlay_pages
+            .iter()
+            .position(|p| p.gpn == gpn)
+            .ok_or(HvError::OperationDenied)?;
+
+        // Restore its permissions.
+        self.apply_protections(
+            MemoryRange::from_4k_gpn_range(gpn..gpn + 1),
+            vtl,
+            overlay_pages[index].previous_permissions,
+        )
+        .map_err(|_| HvError::OperationDenied)?;
+
+        // Nothing from this point on can fail, so we can safely unregister the overlay page.
+        overlay_pages.remove(index);
+
+        // Flush any threads accessing pages that had their VTL protections
+        // changed.
+        guestmem::rcu().synchronize_blocking();
+
+        // Since page protections were modified, we must invalidate the TLB to
+        // ensure that the new permissions are observed, and wait for other CPUs
+        // to release all guest mappings before declaring that the VTL
+        // protection change has completed.
+        tlb_access.flush(vtl);
+        tlb_access.set_wait_for_tlb_locks(vtl);
+        Ok(())
     }
 
     fn set_vtl1_protections_enabled(&self) {
