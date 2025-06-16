@@ -529,7 +529,9 @@ pub unsafe trait GuestMemoryAccess: 'static + Send + Sync {
     }
 
     /// Unlocks the specified guest physical pages (GPNs) after exclusive access.
-    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    ///
+    /// Panics if asked to unlock a page that was not previously locked.
+    fn unlock_gpns(&self, gpns: &[u64]) {
         let _ = gpns;
         unreachable!()
     }
@@ -582,7 +584,7 @@ trait DynGuestMemoryAccess: 'static + Send + Sync + Any {
 
     fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError>;
 
-    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError>;
+    fn unlock_gpns(&self, gpns: &[u64]);
 }
 
 impl<T: GuestMemoryAccess> DynGuestMemoryAccess for T {
@@ -646,7 +648,7 @@ impl<T: GuestMemoryAccess> DynGuestMemoryAccess for T {
         self.lock_gpns(gpns)
     }
 
-    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn unlock_gpns(&self, gpns: &[u64]) {
         self.unlock_gpns(gpns)
     }
 }
@@ -1031,12 +1033,11 @@ impl<T: GuestMemoryAccess> DynGuestMemoryAccess for MultiRegionGuestMemoryAccess
         Ok(ret)
     }
 
-    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn unlock_gpns(&self, gpns: &[u64]) {
         for gpn in gpns {
-            let (region, offset_in_region) = self.region(gpn * PAGE_SIZE64, PAGE_SIZE64)?;
-            region.unlock_gpns(&[offset_in_region / PAGE_SIZE64])?;
+            let (region, offset_in_region) = self.region(gpn * PAGE_SIZE64, PAGE_SIZE64).unwrap();
+            region.unlock_gpns(&[offset_in_region / PAGE_SIZE64]);
         }
-        Ok(())
     }
 }
 
@@ -2178,7 +2179,7 @@ pub struct LockedPages {
 impl Drop for LockedPages {
     fn drop(&mut self) {
         if let Some(gpns) = &self.gpns {
-            self.mem.imp.unlock_gpns(gpns).unwrap();
+            self.mem.imp.unlock_gpns(gpns);
         }
     }
 }
@@ -2246,7 +2247,7 @@ impl<T: LockedRange> LockedRangeImpl<T> {
 impl<T: LockedRange> Drop for LockedRangeImpl<T> {
     fn drop(&mut self) {
         if let Some(gpns) = &self.gpns {
-            self.mem.imp.unlock_gpns(gpns).unwrap();
+            self.mem.imp.unlock_gpns(gpns);
         }
     }
 }

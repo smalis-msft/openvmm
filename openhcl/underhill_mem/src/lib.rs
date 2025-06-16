@@ -90,10 +90,6 @@ impl RegisterMemory for MshvVtlWithPolicy {
 #[error("failed to register memory with kernel")]
 struct RegistrationError;
 
-#[derive(Debug, Error)]
-#[error("page not locked")]
-struct NotLockedError;
-
 /// Currently built for hardware CVMs, which only define permissions for VTL
 /// 0 and VTL 1 to express what those VTLs have access to. If this were to
 /// extend to non-hardware CVMs, those would need to define permissions

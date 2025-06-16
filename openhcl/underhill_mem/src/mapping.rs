@@ -5,7 +5,6 @@
 #![expect(unsafe_code)]
 
 use crate::MshvVtlWithPolicy;
-use crate::NotLockedError;
 use crate::RegistrationError;
 use crate::registrar::MemoryRegistrar;
 use guestmem::GuestMemoryAccess;
@@ -587,16 +586,15 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
         Ok(true)
     }
 
-    fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn unlock_gpns(&self, gpns: &[u64]) {
         let mut locked_pages = self.locked_pages.lock();
         for gpn in gpns {
             if !locked_pages.remove(gpn) {
-                return Err(GuestMemoryBackingError::other(
-                    gpn * PAGE_SIZE as u64,
-                    NotLockedError,
-                ));
+                panic!(
+                    "Tried to unlock a page that was not locked: {gpn:#x}. Locked pages: {:?}",
+                    *locked_pages
+                );
             }
         }
-        Ok(())
     }
 }
