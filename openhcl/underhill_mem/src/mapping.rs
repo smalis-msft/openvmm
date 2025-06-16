@@ -17,7 +17,6 @@ use inspect::Inspect;
 use memory_range::MemoryRange;
 use parking_lot::Mutex;
 use sparse_mmap::SparseMapping;
-use std::collections::BTreeSet;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use thiserror::Error;
@@ -135,7 +134,7 @@ pub struct GuestMemoryMapping {
     permission_bitmaps: Option<PermissionBitmaps>,
     registrar: Option<MemoryRegistrar<MshvVtlWithPolicy>>,
     #[inspect(with = "|x| inspect::adhoc(|req| inspect::iter_by_index(&*x.lock()).inspect(req))")]
-    pub(crate) locked_pages: Mutex<BTreeSet<u64>>,
+    pub(crate) locked_pages: Mutex<Vec<u64>>,
 }
 
 /// Bitmap implementation using sparse mapping that can be used to track page
@@ -454,7 +453,7 @@ impl GuestMemoryMappingBuilder {
             valid_memory: self.valid_memory.clone(),
             permission_bitmaps,
             registrar,
-            locked_pages: Mutex::new(BTreeSet::new()),
+            locked_pages: Mutex::new(Vec::new()),
         })
     }
 }
@@ -588,13 +587,12 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
 
     fn unlock_gpns(&self, gpns: &[u64]) {
         let mut locked_pages = self.locked_pages.lock();
-        for gpn in gpns {
-            if !locked_pages.remove(gpn) {
-                panic!(
-                    "Tried to unlock a page that was not locked: {gpn:#x}. Locked pages: {:?}",
-                    *locked_pages
-                );
+        for (i, w) in locked_pages.windows(gpns.len()).enumerate() {
+            if w == gpns {
+                locked_pages.drain(i..i + gpns.len());
+                return;
             }
         }
+        panic!("Tried to unlock pages that were not locked");
     }
 }

@@ -530,7 +530,9 @@ pub unsafe trait GuestMemoryAccess: 'static + Send + Sync {
 
     /// Unlocks the specified guest physical pages (GPNs) after exclusive access.
     ///
-    /// Panics if asked to unlock a page that was not previously locked.
+    /// Panics if asked to unlock a page that was not previously locked. The
+    /// caller must ensure that the given slice has the same ordering as the
+    /// one passed to `lock_gpns`.
     fn unlock_gpns(&self, gpns: &[u64]) {
         let _ = gpns;
         unreachable!()
