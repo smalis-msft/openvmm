@@ -2101,8 +2101,10 @@ impl GuestMemory {
                     self.dangerous_access_pre_locked_memory(range.start, range.len() as usize),
                 );
             }
+            let store_gpns = self.inner.imp.lock_gpns(paged_range.gpns())?;
             Ok(LockedRangeImpl {
-                _mem: self.inner.clone(),
+                mem: self.inner.clone(),
+                gpns: store_gpns.then(|| paged_range.gpns().to_vec().into_boxed_slice()),
                 inner: locked_range,
             })
         })
@@ -2230,7 +2232,8 @@ pub trait LockedRange {
 }
 
 pub struct LockedRangeImpl<T: LockedRange> {
-    _mem: Arc<GuestMemoryInner>,
+    mem: Arc<GuestMemoryInner>,
+    gpns: Option<Box<[u64]>>,
     inner: T,
 }
 
@@ -2242,11 +2245,9 @@ impl<T: LockedRange> LockedRangeImpl<T> {
 
 impl<T: LockedRange> Drop for LockedRangeImpl<T> {
     fn drop(&mut self) {
-        // FUTURE: Remove and unlock all sub ranges. This is currently
-        // not necessary yet as only fully mapped VMs are supported.
-        // while let Some(sub_range) = self.inner.pop_sub_range() {
-        //     call self._mem to unlock the sub-range, individually or in batches
-        // }
+        if let Some(gpns) = &self.gpns {
+            self.mem.imp.unlock_gpns(gpns).unwrap();
+        }
     }
 }
 
