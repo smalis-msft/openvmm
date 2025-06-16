@@ -135,12 +135,18 @@ impl<T> SetVpRegisters for HvfHypercallHandler<'_, '_, T> {
                 HvArm64RegisterName::Sipp => self
                     .vp
                     .hv1
-                    .set_simp(value.as_u64(), &mut HvfNoVtlProtections)
+                    .set_simp(
+                        value.as_u64(),
+                        &mut HvfNoVtlProtections(&self.vp.partition.guest_memory),
+                    )
                     .map_err(|_| (HvError::InvalidParameter, 1))?,
                 HvArm64RegisterName::Sifp => self
                     .vp
                     .hv1
-                    .set_siefp(value.as_u64(), &mut HvfNoVtlProtections)
+                    .set_siefp(
+                        value.as_u64(),
+                        &mut HvfNoVtlProtections(&self.vp.partition.guest_memory),
+                    )
                     .map_err(|_| (HvError::InvalidParameter, 1))?,
                 HvArm64RegisterName::Scontrol => self.vp.hv1.set_scontrol(value.as_u64()),
                 HvArm64RegisterName::Eom => {}
@@ -160,18 +166,18 @@ impl<T> SetVpRegisters for HvfHypercallHandler<'_, '_, T> {
     }
 }
 
-struct HvfNoVtlProtections;
-impl hv1_emulator::VtlProtectAccess for HvfNoVtlProtections {
+struct HvfNoVtlProtections<'a>(&'a guestmem::GuestMemory);
+impl<'a> hv1_emulator::VtlProtectAccess for HvfNoVtlProtections<'a> {
     fn check_modify_and_lock_overlay_page(
         &mut self,
-        _gpn: u64,
+        gpn: u64,
         _check_perms: hvdef::HvMapGpaFlags,
         _new_perms: Option<hvdef::HvMapGpaFlags>,
-    ) -> Result<(), hvdef::HvError> {
-        Ok(())
+    ) -> Result<guestmem::LockedPages, HvError> {
+        Ok(self.0.lock_gpns(false, &[gpn]).unwrap())
     }
 
-    fn unlock_overlay_page(&mut self, _gpn: u64) -> Result<(), hvdef::HvError> {
+    fn unlock_overlay_page(&mut self, _gpn: u64) -> Result<(), HvError> {
         Ok(())
     }
 }
