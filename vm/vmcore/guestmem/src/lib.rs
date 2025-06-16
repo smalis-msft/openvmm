@@ -535,7 +535,6 @@ pub unsafe trait GuestMemoryAccess: 'static + Send + Sync {
     /// one passed to `lock_gpns`.
     fn unlock_gpns(&self, gpns: &[u64]) {
         let _ = gpns;
-        unreachable!()
     }
 }
 
