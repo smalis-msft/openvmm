@@ -519,14 +519,19 @@ pub unsafe trait GuestMemoryAccess: 'static + Send + Sync {
         None
     }
 
-    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    /// Locks the specified guest physical pages (GPNs), preventing any mapping
+    /// or permission changes until they are unlocked.
+    ///
+    /// Returns a boolean indicating whether unlocking is required.
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
         let _ = gpns;
-        Ok(())
+        Ok(false)
     }
 
+    /// Unlocks the specified guest physical pages (GPNs) after exclusive access.
     fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
         let _ = gpns;
-        Ok(())
+        unreachable!()
     }
 }
 
@@ -575,7 +580,7 @@ trait DynGuestMemoryAccess: 'static + Send + Sync + Any {
 
     fn expose_va(&self, address: u64, len: u64) -> Result<(), GuestMemoryBackingError>;
 
-    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError>;
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError>;
 
     fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError>;
 }
@@ -637,7 +642,7 @@ impl<T: GuestMemoryAccess> DynGuestMemoryAccess for T {
         self.expose_va(address, len)
     }
 
-    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
         self.lock_gpns(gpns)
     }
 
@@ -1017,12 +1022,13 @@ impl<T: GuestMemoryAccess> DynGuestMemoryAccess for MultiRegionGuestMemoryAccess
         }
     }
 
-    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
+        let mut ret = false;
         for gpn in gpns {
             let (region, offset_in_region) = self.region(gpn * PAGE_SIZE64, PAGE_SIZE64)?;
-            region.lock_gpns(&[offset_in_region / PAGE_SIZE64])?;
+            ret |= region.lock_gpns(&[offset_in_region / PAGE_SIZE64])?;
         }
-        Ok(())
+        Ok(ret)
     }
 
     fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
@@ -1920,10 +1926,10 @@ impl GuestMemory {
                 let page = self.probe_page_for_lock(with_kernel_access, gpa)?;
                 pages.push(PagePtr(page));
             }
-            self.inner.imp.lock_gpns(gpns)?;
+            let store_gpns = self.inner.imp.lock_gpns(gpns)?;
             Ok(LockedPages {
                 pages: pages.into_boxed_slice(),
-                gpns: gpns.to_vec().into_boxed_slice(),
+                gpns: store_gpns.then(|| gpns.to_vec().into_boxed_slice()),
                 mem: self.inner.clone(),
             })
         })
@@ -2162,14 +2168,16 @@ impl GuestMemoryInner {
 #[derive(Clone)]
 pub struct LockedPages {
     pages: Box<[PagePtr]>,
-    gpns: Box<[u64]>,
+    gpns: Option<Box<[u64]>>,
     // maintain a reference to the backing memory
     mem: Arc<GuestMemoryInner>,
 }
 
 impl Drop for LockedPages {
     fn drop(&mut self) {
-        self.mem.imp.unlock_gpns(&self.gpns).unwrap();
+        if let Some(gpns) = &self.gpns {
+            self.mem.imp.unlock_gpns(gpns).unwrap();
+        }
     }
 }
 

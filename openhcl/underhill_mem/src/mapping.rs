@@ -581,7 +581,7 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
         }
     }
 
-    fn lock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
+    fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
         let mut locked_pages = self.locked_pages.lock();
         for gpn in gpns {
             if locked_pages.contains(gpn) {
@@ -592,7 +592,7 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
             }
         }
         locked_pages.extend_from_slice(gpns);
-        Ok(())
+        Ok(true)
     }
 
     fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
