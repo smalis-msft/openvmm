@@ -873,6 +873,11 @@ impl ProtectIsolatedMemory for HardwareIsolatedMemoryProtector {
     ) -> Result<(), HvError> {
         let mut inner = self.inner.lock();
 
+        // Check that this isn't already registered.
+        if inner.overlay_pages[vtl].iter().any(|p| p.gpn == gpn) {
+            return Err(HvError::OperationDenied);
+        }
+
         // Check that the required permissions are present.
         let current_perms = self.query_protections(vtl, gpn)?;
         if current_perms.into_bits() | check_perms.into_bits() != current_perms.into_bits() {
