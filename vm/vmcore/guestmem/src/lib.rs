@@ -2228,9 +2228,6 @@ impl<'a> AsRef<[&'a Page]> for &'a LockedPages {
 pub trait LockedRange {
     /// Adds a sub-range to this range.
     fn push_sub_range(&mut self, sub_range: &[AtomicU8]);
-
-    /// Removes and returns the last sub range.
-    fn pop_sub_range(&mut self) -> Option<(*const AtomicU8, usize)>;
 }
 
 pub struct LockedRangeImpl<T: LockedRange> {
