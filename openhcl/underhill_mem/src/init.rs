@@ -219,7 +219,7 @@ pub async fn init(params: &Init<'_>) -> anyhow::Result<MemoryMappings> {
         tracing::debug!("Building encrypted memory map");
         let encrypted_mapping = Arc::new({
             let _span = tracing::info_span!("map_vtl1_memory", CVM_ALLOWED).entered();
-            GuestMemoryMapping::builder(0)
+            GuestMemoryMapping::builder(0, hardware_isolated)
                 .dma_base_address(None)
                 .build_with_bitmap(&gpa_fd, &encrypted_memory_view)
                 .context("failed to map lower vtl encrypted memory")?
@@ -233,7 +233,7 @@ pub async fn init(params: &Init<'_>) -> anyhow::Result<MemoryMappings> {
         tracing::debug!("Building VTL0 memory map");
         let vtl0_mapping = Arc::new({
             let _span = tracing::info_span!("map_vtl0_memory", CVM_ALLOWED).entered();
-            GuestMemoryMapping::builder(0)
+            GuestMemoryMapping::builder(0, hardware_isolated)
                 .dma_base_address(None)
                 .use_permissions_bitmaps(if use_vtl1 { Some(true) } else { None })
                 .build_with_bitmap(&gpa_fd, &encrypted_memory_view)
@@ -322,7 +322,7 @@ pub async fn init(params: &Init<'_>) -> anyhow::Result<MemoryMappings> {
 
         let shared_mapping = Arc::new({
             let _span = tracing::info_span!("map_shared_memory", CVM_ALLOWED).entered();
-            GuestMemoryMapping::builder(shared_offset)
+            GuestMemoryMapping::builder(shared_offset, hardware_isolated)
                 .shared(true)
                 .ignore_registration_failure(params.boot_init.is_none())
                 .dma_base_address(Some(dma_base_address))
@@ -422,7 +422,7 @@ pub async fn init(params: &Init<'_>) -> anyhow::Result<MemoryMappings> {
             let base_address = params.vtl0_alias_map_bit.unwrap_or(0);
 
             Arc::new(
-                GuestMemoryMapping::builder(base_address)
+                GuestMemoryMapping::builder(base_address, hardware_isolated)
                     .for_kernel_access(true)
                     .dma_base_address(Some(base_address))
                     .ignore_registration_failure(params.boot_init.is_none())
@@ -458,7 +458,7 @@ pub async fn init(params: &Init<'_>) -> anyhow::Result<MemoryMappings> {
 
                 let _span = tracing::info_span!("map_vtl1_memory", CVM_ALLOWED).entered();
                 Some(Arc::new(
-                    GuestMemoryMapping::builder(0)
+                    GuestMemoryMapping::builder(0, hardware_isolated)
                         .for_kernel_access(true)
                         .dma_base_address(Some(0))
                         .ignore_registration_failure(params.boot_init.is_none())

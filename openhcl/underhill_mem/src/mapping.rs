@@ -135,6 +135,7 @@ pub struct GuestMemoryMapping {
     registrar: Option<MemoryRegistrar<MshvVtlWithPolicy>>,
     #[inspect(with = "|x| inspect::adhoc(|req| inspect::iter_by_index(&*x.lock()).inspect(req))")]
     pub(crate) locked_pages: Mutex<Vec<u64>>,
+    hardware_isolated: bool,
 }
 
 /// Bitmap implementation using sparse mapping that can be used to track page
@@ -258,6 +259,7 @@ pub enum MappingError {
 /// A builder for [`GuestMemoryMapping`].
 pub struct GuestMemoryMappingBuilder {
     physical_address_base: u64,
+    hardware_isolated: bool,
     valid_memory: Option<Arc<GuestValidMemory>>,
     permissions_bitmap_state: Option<bool>,
     shared: bool,
@@ -449,6 +451,7 @@ impl GuestMemoryMappingBuilder {
 
         Ok(GuestMemoryMapping {
             mapping,
+            hardware_isolated: self.hardware_isolated,
             iova_offset: self.dma_base_address,
             valid_memory: self.valid_memory.clone(),
             permission_bitmaps,
@@ -464,9 +467,13 @@ impl GuestMemoryMapping {
     /// Map all ranges with a physical address offset of
     /// `physical_address_base`. This can be zero, or the VTOM address for SNP,
     /// or the VTL0 alias address for non-isolated/software-isolated VMs.
-    pub fn builder(physical_address_base: u64) -> GuestMemoryMappingBuilder {
+    pub fn builder(
+        physical_address_base: u64,
+        hardware_isolated: bool,
+    ) -> GuestMemoryMappingBuilder {
         GuestMemoryMappingBuilder {
             physical_address_base,
+            hardware_isolated,
             valid_memory: None,
             permissions_bitmap_state: None,
             shared: false,
@@ -580,12 +587,17 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
     }
 
     fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
-        let mut locked_pages = self.locked_pages.lock();
-        locked_pages.extend(gpns.iter());
-        Ok(true)
+        if self.hardware_isolated {
+            let mut locked_pages = self.locked_pages.lock();
+            locked_pages.extend(gpns.iter());
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn unlock_gpns(&self, gpns: &[u64]) {
+        debug_assert!(self.hardware_isolated);
         let mut locked_pages = self.locked_pages.lock();
         for (i, w) in locked_pages.windows(gpns.len()).enumerate() {
             if w == gpns {
