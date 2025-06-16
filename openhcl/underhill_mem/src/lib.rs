@@ -91,10 +91,6 @@ impl RegisterMemory for MshvVtlWithPolicy {
 struct RegistrationError;
 
 #[derive(Debug, Error)]
-#[error("page already locked")]
-struct AlreadyLockedError;
-
-#[derive(Debug, Error)]
 #[error("page not locked")]
 struct NotLockedError;
 

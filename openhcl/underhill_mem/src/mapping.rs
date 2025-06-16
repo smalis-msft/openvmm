@@ -4,7 +4,6 @@
 // UNSAFETY: Implementing GuestMemoryAccess.
 #![expect(unsafe_code)]
 
-use crate::AlreadyLockedError;
 use crate::MshvVtlWithPolicy;
 use crate::NotLockedError;
 use crate::RegistrationError;
@@ -19,6 +18,7 @@ use inspect::Inspect;
 use memory_range::MemoryRange;
 use parking_lot::Mutex;
 use sparse_mmap::SparseMapping;
+use std::collections::BTreeSet;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use thiserror::Error;
@@ -136,7 +136,7 @@ pub struct GuestMemoryMapping {
     permission_bitmaps: Option<PermissionBitmaps>,
     registrar: Option<MemoryRegistrar<MshvVtlWithPolicy>>,
     #[inspect(with = "|x| inspect::adhoc(|req| inspect::iter_by_index(&*x.lock()).inspect(req))")]
-    pub(crate) locked_pages: Mutex<Vec<u64>>,
+    pub(crate) locked_pages: Mutex<BTreeSet<u64>>,
 }
 
 /// Bitmap implementation using sparse mapping that can be used to track page
@@ -455,7 +455,7 @@ impl GuestMemoryMappingBuilder {
             valid_memory: self.valid_memory.clone(),
             permission_bitmaps,
             registrar,
-            locked_pages: Mutex::new(Vec::new()),
+            locked_pages: Mutex::new(BTreeSet::new()),
         })
     }
 }
@@ -583,24 +583,14 @@ unsafe impl GuestMemoryAccess for GuestMemoryMapping {
 
     fn lock_gpns(&self, gpns: &[u64]) -> Result<bool, GuestMemoryBackingError> {
         let mut locked_pages = self.locked_pages.lock();
-        for gpn in gpns {
-            if locked_pages.contains(gpn) {
-                return Err(GuestMemoryBackingError::other(
-                    gpn * PAGE_SIZE as u64,
-                    AlreadyLockedError,
-                ));
-            }
-        }
-        locked_pages.extend_from_slice(gpns);
+        locked_pages.extend(gpns.iter());
         Ok(true)
     }
 
     fn unlock_gpns(&self, gpns: &[u64]) -> Result<(), GuestMemoryBackingError> {
         let mut locked_pages = self.locked_pages.lock();
         for gpn in gpns {
-            if let Some(pos) = locked_pages.iter().position(|&x| x == *gpn) {
-                locked_pages.remove(pos);
-            } else {
+            if !locked_pages.remove(gpn) {
                 return Err(GuestMemoryBackingError::other(
                     gpn * PAGE_SIZE as u64,
                     NotLockedError,
