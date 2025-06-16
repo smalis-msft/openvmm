@@ -46,7 +46,7 @@ pub trait VtlProtectAccess {
         gpn: u64,
         check_perms: hvdef::HvMapGpaFlags,
         new_perms: Option<hvdef::HvMapGpaFlags>,
-    ) -> Result<(), hvdef::HvError>;
+    ) -> Result<guestmem::LockedPages, hvdef::HvError>;
 
     /// Unlocks an overlay page by its GPN, restoring its previous permissions.
     fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), hvdef::HvError>;

@@ -760,12 +760,7 @@ impl TdxBackedShared {
         // performance would be poor for cases where the L1 implements
         // high-performance devices.
         let untrusted_synic = (partition_params.handle_synic && !partition_params.hide_isolation)
-            .then(|| {
-                GlobalSynic::new(
-                    params.guest_memory[GuestVtl::Vtl0].clone(),
-                    partition_params.topology.vp_count(),
-                )
-            });
+            .then(|| GlobalSynic::new(partition_params.topology.vp_count()));
 
         // TODO TDX: Consider just using MSR kernel module instead of explicit ioctl.
         let cr4_fixed1 = params.hcl.read_vmx_cr4_fixed1();
@@ -1032,6 +1027,7 @@ impl BackingPrivate for TdxBacked {
                     this.partition,
                     this.shared,
                 ),
+                guest_memory: &this.partition.gm[GuestVtl::Vtl0],
             };
 
             synic
@@ -2677,6 +2673,7 @@ impl UhProcessor<'_, TdxBacked> {
                                 self.partition,
                                 self.shared,
                             ),
+                            guest_memory: &self.partition.gm[intercepted_vtl],
                         },
                     )?;
                 // Propagate sint MSR writes to the hypervisor as well

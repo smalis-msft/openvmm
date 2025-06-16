@@ -458,6 +458,7 @@ impl<T, B: HardwareIsolatedBacking> UhHypercallHandler<'_, '_, T, B> {
                                 self.vp.partition,
                                 self.vp.shared,
                             ),
+                            guest_memory: &self.vp.partition.gm[vtl],
                         },
                     )
                     .map_err(|_| HvError::InvalidRegisterValue)
@@ -612,6 +613,7 @@ impl<T, B: HardwareIsolatedBacking> UhHypercallHandler<'_, '_, T, B> {
                             self.vp.partition,
                             self.vp.shared,
                         ),
+                        guest_memory: &self.vp.partition.gm[vtl],
                     },
                 )
             }
@@ -1523,6 +1525,7 @@ pub(crate) struct CvmVtlProtectAccess<'a> {
     pub vtl: GuestVtl,
     pub protector: &'a dyn crate::ProtectIsolatedMemory,
     pub tlb_access: &'a mut dyn TlbFlushLockAccess,
+    pub guest_memory: &'a GuestMemory,
 }
 
 impl hv1_emulator::VtlProtectAccess for CvmVtlProtectAccess<'_> {
@@ -1531,9 +1534,19 @@ impl hv1_emulator::VtlProtectAccess for CvmVtlProtectAccess<'_> {
         gpn: u64,
         check_perms: HvMapGpaFlags,
         new_perms: Option<HvMapGpaFlags>,
-    ) -> Result<(), HvError> {
-        self.protector
-            .register_overlay_page(self.vtl, gpn, check_perms, new_perms, self.tlb_access)
+    ) -> Result<guestmem::LockedPages, HvError> {
+        self.protector.register_overlay_page(
+            self.vtl,
+            gpn,
+            check_perms,
+            new_perms,
+            self.tlb_access,
+        )?;
+        // TODO: underhill_mem should really be responsible for constructing the
+        // LockedPages, but that requires some refactoring. For now, we just use
+        // guest memory to lock the pages. When this is cleaned up, don't forget
+        // to also cleanup how underhill_mem handles locking overlay pages.
+        Ok(self.guest_memory.lock_gpns(false, &[gpn]).unwrap())
     }
 
     fn unlock_overlay_page(&mut self, gpn: u64) -> Result<(), HvError> {
@@ -1569,6 +1582,7 @@ impl<B: HardwareIsolatedBacking> UhProcessor<'_, B> {
                 .isolated_memory_protector
                 .as_ref(),
             tlb_access: &mut B::tlb_flush_lock_access(self_index, self.partition, self.shared),
+            guest_memory: &self.partition.gm[vtl],
         };
         let r = hv.msr_write(msr, value, &mut access);
 

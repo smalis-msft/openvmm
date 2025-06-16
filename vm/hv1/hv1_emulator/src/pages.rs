@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use crate::VtlProtectAccess;
-use guestmem::GuestMemory;
 use guestmem::LockedPages;
 use guestmem::Page;
 use hvdef::HvMapGpaFlags;
@@ -17,18 +16,7 @@ pub(crate) struct LockedPage {
 }
 
 impl LockedPage {
-    pub fn new(gpn: u64, guest_memory: &GuestMemory) -> Result<Self, guestmem::GuestMemoryError> {
-        let page = match guest_memory.lock_gpns(false, &[gpn]) {
-            Ok(it) => it,
-            Err(err) => {
-                tracelimit::error_ratelimited!(
-                    gpn,
-                    err = &err as &dyn std::error::Error,
-                    "Failed to lock page"
-                );
-                return Err(err);
-            }
-        };
+    pub fn new(gpn: u64, page: LockedPages) -> Result<Self, guestmem::GuestMemoryError> {
         assert!(page.pages().len() == 1);
         Ok(Self { page, gpn })
     }
@@ -55,15 +43,14 @@ impl OverlayPage {
     pub fn remap(
         &mut self,
         new_gpn: u64,
-        guest_memory: &GuestMemory,
         prot_access: &mut dyn VtlProtectAccess,
     ) -> Result<(), hvdef::HvError> {
-        prot_access.check_modify_and_lock_overlay_page(
+        let new_page = prot_access.check_modify_and_lock_overlay_page(
             new_gpn,
             HvMapGpaFlags::new().with_readable(true).with_writable(true),
             None,
         )?;
-        let new_page = LockedPage::new(new_gpn, guest_memory).unwrap();
+        let new_page = LockedPage::new(new_gpn, new_page).unwrap();
         new_page.atomic_write_obj(&self.atomic_read_obj::<[u8; 4096]>());
 
         self.unlock_prev_gpn(prot_access);
