@@ -18,6 +18,7 @@ use hvdef::HvInterceptAccessType;
 use hvdef::HvMapGpaFlags;
 use thiserror::Error;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::io::CpuIo;
 use vm_topology::processor::VpIndex;
 use zerocopy::FromBytes;
@@ -174,7 +175,7 @@ pub async fn emulate<T: EmulatorSupport>(
 ) -> Result<(), VpHaltReason> {
     emulate_core(support, intercept_state, emu_mem, dev)
         .await
-        .map_err(|e| VpHaltReason::EmulationFailure(e.into()))
+        .map_err(|e| VpHaltReasonKind::EmulationFailure(e.into()).into())
 }
 
 async fn emulate_core<T: EmulatorSupport>(

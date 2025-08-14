@@ -44,6 +44,7 @@ use inspect::InspectMut;
 use inspect_counters::Counter;
 use parking_lot::RwLock;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::aarch64::vp;
 use virt::aarch64::vp::AccessVpState;
@@ -161,7 +162,7 @@ impl BackingPrivate for HypervisorBackedArm64 {
         let intercepted = this
             .runner
             .run()
-            .map_err(|e| VpHaltReason::Hypervisor(MshvRunVpError(e).into()))?;
+            .map_err(|e| VpHaltReasonKind::Hypervisor(MshvRunVpError(e).into()))?;
 
         if intercepted {
             let stat = match this.runner.exit_message().header.typ {
@@ -188,8 +189,10 @@ impl BackingPrivate for HypervisorBackedArm64 {
                         .exit_message()
                         .as_message::<hvdef::HvArm64ResetInterceptMessage>();
                     match message.reset_type {
-                        HvArm64ResetType::POWER_OFF => return Err(VpHaltReason::PowerOff),
-                        HvArm64ResetType::REBOOT => return Err(VpHaltReason::Reset),
+                        HvArm64ResetType::POWER_OFF => {
+                            return Err(VpHaltReasonKind::PowerOff.into());
+                        }
+                        HvArm64ResetType::REBOOT => return Err(VpHaltReasonKind::Reset.into()),
                         ty => unreachable!("unknown reset type: {:#x?}", ty),
                     }
                 }
@@ -294,7 +297,7 @@ impl UhProcessor<'_, HypervisorBackedArm64> {
         tracing::trace!(msg = %format_args!("{:x?}", message), "hypercall");
 
         let intercepted_vtl = Self::intercepted_vtl(&message.header)
-            .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+            .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
         let guest_memory = &self.partition.gm[intercepted_vtl];
         let smccc_convention = message.immediate == 0;
 
@@ -327,7 +330,7 @@ impl UhProcessor<'_, HypervisorBackedArm64> {
         };
 
         let intercepted_vtl = Self::intercepted_vtl(&message.header)
-            .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+            .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
 
         // Fast path for monitor page writes.
         if Some(message.guest_physical_address & !(hvdef::HV_PAGE_SIZE - 1))
@@ -386,9 +389,7 @@ impl UhProcessor<'_, HypervisorBackedArm64> {
             // Note: SGX memory should be included in this check, so if SGX is
             // no longer included in the lower_vtl_memory_layout, make sure the
             // appropriate changes are reflected here.
-            Err(VpHaltReason::InvalidVmState(
-                UnacceptedMemoryAccess(gpa).into(),
-            ))
+            Err(VpHaltReasonKind::InvalidVmState(UnacceptedMemoryAccess(gpa).into()).into())
         } else {
             // TODO: for hardware isolation, if the intercept is due to a guest
             // error, inject a machine check

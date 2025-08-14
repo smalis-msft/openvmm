@@ -39,6 +39,7 @@ use virt::PartitionCapabilities;
 use virt::ProtoPartitionConfig;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::vp::Registers;
@@ -419,8 +420,8 @@ impl virt::Processor for KvmProcessor<'_> {
                     self.runner.run()
                 };
 
-                let exit =
-                    exit.map_err(|err| VpHaltReason::Hypervisor(KvmRunVpError::Run(err).into()))?;
+                let exit = exit
+                    .map_err(|err| VpHaltReasonKind::Hypervisor(KvmRunVpError::Run(err).into()))?;
                 pending_exit = true;
                 match exit {
                     kvm::Exit::Interrupted => {
@@ -433,23 +434,25 @@ impl virt::Processor for KvmProcessor<'_> {
                         dev.read_mmio(self.vpindex, address, data).await
                     }
                     kvm::Exit::Shutdown => {
-                        return Err(VpHaltReason::TripleFault { vtl: Vtl::Vtl0 });
+                        return Err(VpHaltReasonKind::TripleFault { vtl: Vtl::Vtl0 }.into());
                     }
                     kvm::Exit::Eoi { irq } => {
                         dev.handle_eoi(irq.into());
                     }
                     kvm::Exit::InternalError { error, .. } => {
-                        return Err(VpHaltReason::InvalidVmState(
+                        return Err(VpHaltReasonKind::InvalidVmState(
                             KvmRunVpError::InternalError(error).into(),
-                        ));
+                        )
+                        .into());
                     }
                     kvm::Exit::FailEntry {
                         hardware_entry_failure_reason,
                     } => {
                         tracing::error!(hardware_entry_failure_reason, "VP entry failed");
-                        return Err(VpHaltReason::InvalidVmState(
+                        return Err(VpHaltReasonKind::InvalidVmState(
                             KvmRunVpError::InvalidVpState.into(),
-                        ));
+                        )
+                        .into());
                     }
                     _ => panic!("unhandled exit: {:?}", exit),
                 }

@@ -54,6 +54,7 @@ use parking_lot::RwLock;
 use std::sync::atomic::Ordering::Relaxed;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::state::HvRegisterState;
@@ -218,7 +219,7 @@ impl BackingPrivate for HypervisorBackedX86 {
             let mut run = this
                 .runner
                 .run_sidecar()
-                .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+                .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
             match stop.until_stop(run.wait()).await {
                 Ok(r) => r,
                 Err(stop) => {
@@ -231,19 +232,19 @@ impl BackingPrivate for HypervisorBackedX86 {
                     r
                 }
             }
-            .map_err(|e| VpHaltReason::InvalidVmState(ioctl::Error::Sidecar(e).into()))?
+            .map_err(|e| VpHaltReasonKind::InvalidVmState(ioctl::Error::Sidecar(e).into()))?
         } else {
             this.unlock_tlb_lock(Vtl::Vtl2);
             this.runner
                 .run()
-                .map_err(|e| VpHaltReason::Hypervisor(MshvRunVpError(e).into()))?
+                .map_err(|e| VpHaltReasonKind::Hypervisor(MshvRunVpError(e).into()))?
         };
 
         if intercepted {
             let message_type = this.runner.exit_message().header.typ;
 
-            let mut intercept_handler =
-                InterceptHandler::new(this).map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+            let mut intercept_handler = InterceptHandler::new(this)
+                .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
 
             let stat = match message_type {
                 HvMessageType::HvMessageTypeX64IoPortIntercept => {
@@ -313,7 +314,7 @@ impl BackingPrivate for HypervisorBackedX86 {
                 this.inner
                     .set_sidecar_exit_reason(SidecarExitReason::Exit(parse_sidecar_exit(message)));
                 this.signaled_sidecar_exit = true;
-                return Err(VpHaltReason::Cancel);
+                return Err(VpHaltReasonKind::Cancel.into());
             }
         }
         Ok(())
@@ -723,9 +724,7 @@ impl<'a, 'b> InterceptHandler<'a, 'b> {
             // Note: SGX memory should be included in this check, so if SGX is
             // no longer included in the lower_vtl_memory_layout, make sure the
             // appropriate changes are reflected here.
-            Err(VpHaltReason::InvalidVmState(
-                UnacceptedMemoryAccess(gpa).into(),
-            ))
+            Err(VpHaltReasonKind::InvalidVmState(UnacceptedMemoryAccess(gpa).into()).into())
         } else {
             self.handle_mmio_exit(dev).await
         }
@@ -825,9 +824,10 @@ impl<'a, 'b> InterceptHandler<'a, 'b> {
     }
 
     fn handle_unrecoverable_exception(&self) -> Result<(), VpHaltReason> {
-        Err(VpHaltReason::TripleFault {
+        Err(VpHaltReasonKind::TripleFault {
             vtl: self.intercepted_vtl.into(),
-        })
+        }
+        .into())
     }
 
     fn handle_exception(&mut self) -> Result<(), VpHaltReason> {

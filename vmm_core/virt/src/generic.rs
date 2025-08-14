@@ -546,9 +546,44 @@ impl NeedsYield {
     }
 }
 
+pub static PANIC_ON_FAILURE_CONSTRUCTION: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+pub struct VpHaltReason(VpHaltReasonKind);
+
+impl VpHaltReason {
+    #[track_caller]
+    pub fn new(kind: VpHaltReasonKind) -> Self {
+        if PANIC_ON_FAILURE_CONSTRUCTION.load(Ordering::Relaxed) {
+            match &kind {
+                VpHaltReasonKind::InvalidVmState(e)
+                | VpHaltReasonKind::Hypervisor(e)
+                | VpHaltReasonKind::EmulationFailure(e) => {
+                    tracing::error!(e = ?e.as_ref(), "immediate mode failure");
+                    panic!("{kind:?}");
+                }
+                _ => {}
+            }
+        }
+        Self(kind)
+    }
+
+    /// Returns the reason that [`Processor::run_vp`] returned.
+    pub fn kind(self) -> VpHaltReasonKind {
+        self.0
+    }
+}
+
+impl From<VpHaltReasonKind> for VpHaltReason {
+    #[track_caller]
+    fn from(kind: VpHaltReasonKind) -> Self {
+        Self::new(kind)
+    }
+}
+
 /// The reason that [`Processor::run_vp`] returned.
 #[derive(Debug)]
-pub enum VpHaltReason {
+pub enum VpHaltReasonKind {
     /// The processor was requested to stop.
     Stop(VpStopped),
     /// The processor task should be restarted, possibly on a different thread.
@@ -576,8 +611,9 @@ pub enum VpHaltReason {
 }
 
 impl From<VpStopped> for VpHaltReason {
+    #[track_caller]
     fn from(stop: VpStopped) -> Self {
-        Self::Stop(stop)
+        Self::new(VpHaltReasonKind::Stop(stop))
     }
 }
 

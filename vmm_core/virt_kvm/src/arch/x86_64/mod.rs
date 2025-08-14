@@ -63,6 +63,7 @@ use virt::ProtoPartitionConfig;
 use virt::ResetPartition;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::irqcon::DeliveryMode;
@@ -1061,7 +1062,7 @@ impl Processor for KvmProcessor<'_> {
                     .store(false, Ordering::Relaxed);
                 if self.runner.check_or_request_interrupt_window() {
                     self.deliver_pic_interrupt(dev)
-                        .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+                        .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
                 }
             }
 
@@ -1091,8 +1092,8 @@ impl Processor for KvmProcessor<'_> {
                     self.runner.run()
                 };
 
-                let exit =
-                    exit.map_err(|err| VpHaltReason::Hypervisor(KvmRunVpError::Run(err).into()))?;
+                let exit = exit
+                    .map_err(|err| VpHaltReasonKind::Hypervisor(KvmRunVpError::Run(err).into()))?;
                 pending_exit = true;
                 match exit {
                     kvm::Exit::Interrupted => {
@@ -1101,7 +1102,7 @@ impl Processor for KvmProcessor<'_> {
                     }
                     kvm::Exit::InterruptWindow => {
                         self.deliver_pic_interrupt(dev)
-                            .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+                            .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
                     }
                     kvm::Exit::IoIn { port, data, size } => {
                         for data in data.chunks_mut(size as usize) {
@@ -1137,7 +1138,7 @@ impl Processor for KvmProcessor<'_> {
                         }
                     }
                     kvm::Exit::Shutdown => {
-                        return Err(VpHaltReason::TripleFault { vtl: Vtl::Vtl0 });
+                        return Err(VpHaltReasonKind::TripleFault { vtl: Vtl::Vtl0 }.into());
                     }
                     kvm::Exit::SynicUpdate {
                         msr: _msr,
@@ -1180,9 +1181,9 @@ impl Processor for KvmProcessor<'_> {
                         if dr6 & x86defs::DR6_BREAKPOINT_MASK != 0 {
                             let i = dr6.trailing_zeros() as usize;
                             let bp = HardwareBreakpoint::from_dr7(dr7, self.guest_debug_db[i], i);
-                            return Err(VpHaltReason::HwBreak(bp));
+                            return Err(VpHaltReasonKind::HwBreak(bp).into());
                         } else if dr6 & x86defs::DR6_SINGLE_STEP != 0 {
-                            return Err(VpHaltReason::SingleStep);
+                            return Err(VpHaltReasonKind::SingleStep.into());
                         } else {
                             tracing::warn!(dr6, "debug exit with unknown dr6 condition");
                         }
@@ -1191,25 +1192,28 @@ impl Processor for KvmProcessor<'_> {
                         dev.handle_eoi(irq.into());
                     }
                     kvm::Exit::InternalError { error, .. } => {
-                        return Err(VpHaltReason::InvalidVmState(
+                        return Err(VpHaltReasonKind::InvalidVmState(
                             KvmRunVpError::InternalError(error).into(),
-                        ));
+                        )
+                        .into());
                     }
                     kvm::Exit::EmulationFailure { instruction_bytes } => {
-                        return Err(VpHaltReason::EmulationFailure(
+                        return Err(VpHaltReasonKind::EmulationFailure(
                             EmulationError {
                                 instruction_bytes: instruction_bytes.to_vec(),
                             }
                             .into(),
-                        ));
+                        )
+                        .into());
                     }
                     kvm::Exit::FailEntry {
                         hardware_entry_failure_reason,
                     } => {
                         tracing::error!(hardware_entry_failure_reason, "VP entry failed");
-                        return Err(VpHaltReason::InvalidVmState(
+                        return Err(VpHaltReasonKind::InvalidVmState(
                             KvmRunVpError::InvalidVpState.into(),
-                        ));
+                        )
+                        .into());
                     }
                 }
             }

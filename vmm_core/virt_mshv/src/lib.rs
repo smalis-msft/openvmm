@@ -63,6 +63,7 @@ use virt::ProtoPartition;
 use virt::ProtoPartitionConfig;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::irqcon::MsiRequest;
@@ -1381,7 +1382,7 @@ impl virt::Processor for MshvProcessor<'_> {
             match vcpufd.run() {
                 Ok(exit) => match HvMessageType(exit.header.message_type) {
                     HvMessageType::HvMessageTypeUnrecoverableException => {
-                        return Err(VpHaltReason::TripleFault { vtl: Vtl::Vtl0 });
+                        return Err(VpHaltReasonKind::TripleFault { vtl: Vtl::Vtl0 }.into());
                     }
                     HvMessageType::HvMessageTypeX64IoPortIntercept => {
                         self.handle_io_port_intercept(&exit, dev).await?;

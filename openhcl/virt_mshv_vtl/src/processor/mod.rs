@@ -72,6 +72,7 @@ use std::task::Poll;
 use virt::Processor;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use vm_topology::processor::TargetVpInfo;
@@ -608,7 +609,7 @@ impl<T: Backing> UhProcessor<'_, T> {
             ];
 
             if debug_regs.dr6 & x86defs::DR6_SINGLE_STEP != 0 {
-                return Err(VpHaltReason::SingleStep);
+                return Err(VpHaltReasonKind::SingleStep.into());
             }
 
             // Last four bits of DR6 indicate which breakpoint was triggered.
@@ -616,16 +617,17 @@ impl<T: Backing> UhProcessor<'_, T> {
             let i = debug_regs.dr6.trailing_zeros() as usize;
             if i >= BREAKPOINT_INDEX_OFFSET {
                 // Received a debug exception not triggered by a breakpoint or single step.
-                return Err(VpHaltReason::InvalidVmState(
+                return Err(VpHaltReasonKind::InvalidVmState(
                     UnexpectedDebugException {
                         dr6: debug_regs.dr6,
                     }
                     .into(),
-                ));
+                )
+                .into());
             }
             let bp = virt::x86::HardwareBreakpoint::from_dr7(debug_regs.dr7, dr[i], i);
 
-            return Err(VpHaltReason::HwBreak(bp));
+            return Err(VpHaltReasonKind::HwBreak(bp).into());
         }
 
         panic!("unexpected debug exception in VTL {:?}", vtl);
@@ -706,7 +708,7 @@ impl<'p, T: Backing> Processor for UhProcessor<'p, T> {
                 self.inner
                     .set_sidecar_exit_reason(SidecarExitReason::ManualRequest);
                 self.signaled_sidecar_exit = true;
-                return Err(VpHaltReason::Cancel);
+                return Err(VpHaltReasonKind::Cancel.into());
             }
         } else {
             let mut current = Default::default();

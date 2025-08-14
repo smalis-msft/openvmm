@@ -13,6 +13,7 @@ use hvdef::HvInterceptAccessType;
 use hvdef::HvMapGpaFlags;
 use thiserror::Error;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::io::CpuIo;
 use vm_topology::processor::VpIndex;
 use x86defs::Exception;
@@ -296,7 +297,7 @@ pub async fn emulate<T: EmulatorSupport>(
 ) -> Result<(), VpHaltReason> {
     emulate_core(support, emu_mem, dev)
         .await
-        .map_err(|e| VpHaltReason::EmulationFailure(e.into()))
+        .map_err(|e| VpHaltReasonKind::EmulationFailure(e.into()).into())
 }
 
 async fn emulate_core<T: EmulatorSupport>(
@@ -515,7 +516,7 @@ pub async fn emulate_insn_memory_op<T: EmulatorSupport>(
             emu.write_memory(segment, gva, alignment, data).await
         }
     }
-    .map_err(|e| VpHaltReason::EmulationFailure(e.into()))
+    .map_err(|e| VpHaltReasonKind::EmulationFailure(e.into()).into())
 
     // No need to flush the cache, we have not modified any registers.
 }

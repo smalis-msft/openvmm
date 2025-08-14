@@ -37,7 +37,7 @@ use virt::InitialRegs;
 use virt::Processor;
 use virt::StopVp;
 use virt::StopVpSource;
-use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::VpStopped;
 use virt::io::CpuIo;
@@ -130,12 +130,12 @@ where
     ) -> Result<StopReason, HaltReason> {
         let r = self.vp.run_vp(stop, self.io).await;
         // Convert the inner error type to a generic one.
-        match r.unwrap_err() {
-            VpHaltReason::Stop(stop) => Ok(StopReason::OnRequest(stop)),
-            VpHaltReason::Cancel => Ok(StopReason::Cancel),
-            VpHaltReason::PowerOff => Err(HaltReason::PowerOff),
-            VpHaltReason::Reset => Err(HaltReason::Reset),
-            VpHaltReason::TripleFault { vtl } => {
+        match r.unwrap_err().kind() {
+            VpHaltReasonKind::Stop(stop) => Ok(StopReason::OnRequest(stop)),
+            VpHaltReasonKind::Cancel => Ok(StopReason::Cancel),
+            VpHaltReasonKind::PowerOff => Err(HaltReason::PowerOff),
+            VpHaltReasonKind::Reset => Err(HaltReason::Reset),
+            VpHaltReasonKind::TripleFault { vtl } => {
                 let registers = self.vp.access_state(vtl).registers().ok().map(Arc::new);
 
                 tracing::error!(?vtl, vp = self.vp_index.index(), "triple fault");
@@ -149,7 +149,7 @@ where
                     registers,
                 })
             }
-            VpHaltReason::InvalidVmState(err) => {
+            VpHaltReasonKind::InvalidVmState(err) => {
                 tracing::error!(
                     err = err.as_ref() as &dyn std::error::Error,
                     "invalid VM state"
@@ -158,7 +158,7 @@ where
                     vp: self.vp_index.index(),
                 })
             }
-            VpHaltReason::EmulationFailure(err) => {
+            VpHaltReasonKind::EmulationFailure(err) => {
                 tracing::error!(
                     err = err.as_ref() as &dyn std::error::Error,
                     "emulation failure"
@@ -167,7 +167,7 @@ where
                     vp: self.vp_index.index(),
                 })
             }
-            VpHaltReason::Hypervisor(err) => {
+            VpHaltReasonKind::Hypervisor(err) => {
                 tracing::error!(
                     err = err.as_ref() as &dyn std::error::Error,
                     "fatal vp error"
@@ -176,13 +176,13 @@ where
                     vp: self.vp_index.index(),
                 })
             }
-            VpHaltReason::SingleStep => {
+            VpHaltReasonKind::SingleStep => {
                 tracing::debug!("single step");
                 Err(HaltReason::SingleStep {
                     vp: self.vp_index.index(),
                 })
             }
-            VpHaltReason::HwBreak(breakpoint) => {
+            VpHaltReasonKind::HwBreak(breakpoint) => {
                 tracing::debug!(?breakpoint, "hardware breakpoint");
                 Err(HaltReason::HwBreakpoint {
                     vp: self.vp_index.index(),

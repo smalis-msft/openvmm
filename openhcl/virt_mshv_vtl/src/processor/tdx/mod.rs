@@ -57,6 +57,7 @@ use tlb_flush::TdxFlushState;
 use tlb_flush::TdxPartitionFlushState;
 use virt::Processor;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::state::StateElement;
@@ -1566,7 +1567,7 @@ impl UhProcessor<'_, TdxBacked> {
         let has_intercept = self
             .runner
             .run()
-            .map_err(|e| VpHaltReason::Hypervisor(TdxRunVpError(e).into()))?;
+            .map_err(|e| VpHaltReasonKind::Hypervisor(TdxRunVpError(e).into()))?;
 
         // TLB flushes can only target lower VTLs, so it is fine to use a relaxed
         // ordering here. The worst that can happen is some spurious wakes, due
@@ -2135,9 +2136,10 @@ impl UhProcessor<'_, TdxBacked> {
                 &mut self.backing.vtls[intercepted_vtl].exit_stats.exception
             }
             VmxExitBasic::TRIPLE_FAULT => {
-                return Err(VpHaltReason::TripleFault {
+                return Err(VpHaltReasonKind::TripleFault {
                     vtl: intercepted_vtl.into(),
-                });
+                }
+                .into());
             }
             VmxExitBasic::GDTR_OR_IDTR => {
                 let info = GdtrOrIdtrInstructionInfo::from(exit_info.instr_info().info());
@@ -2182,9 +2184,10 @@ impl UhProcessor<'_, TdxBacked> {
                     .descriptor_table
             }
             _ => {
-                return Err(VpHaltReason::InvalidVmState(
+                return Err(VpHaltReasonKind::InvalidVmState(
                     UnknownVmxExit(exit_info.code().vmx_exit()).into(),
-                ));
+                )
+                .into());
             }
         };
         stat.increment();
@@ -2415,10 +2418,11 @@ impl UhProcessor<'_, TdxBacked> {
                 tracing::error!(CVM_ALLOWED, "VP.ENTER failed with bad guest state");
                 self.trace_processor_state(vtl);
 
-                VpHaltReason::InvalidVmState(VmxBadGuestState.into())
+                VpHaltReasonKind::InvalidVmState(VmxBadGuestState.into())
             }
-            _ => VpHaltReason::InvalidVmState(UnknownVmxExit(vmx_exit).into()),
+            _ => VpHaltReasonKind::InvalidVmState(UnknownVmxExit(vmx_exit).into()),
         }
+        .into()
     }
 
     fn advance_to_next_instruction(&mut self, vtl: GuestVtl) {

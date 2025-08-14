@@ -23,6 +23,7 @@ use thiserror::Error;
 use tracing_helpers::ErrorValueExt;
 use virt::StopVp;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::io::CpuIo;
 use virt::vp::AccessVpState;
 use zerocopy::IntoBytes;
@@ -386,7 +387,7 @@ impl<'a> WhpProcessor<'a> {
             let mut runner = self.current_whp().runner();
             let exit = runner
                 .run()
-                .map_err(|err| VpHaltReason::Hypervisor(WhpRunVpError(err).into()))?;
+                .map_err(|err| VpHaltReasonKind::Hypervisor(WhpRunVpError(err).into()))?;
 
             // Clear lazy EOI before processing the exit.
             if lazy_eoi {
@@ -423,9 +424,10 @@ impl<'a> WhpProcessor<'a> {
             return Ok(());
         }
 
-        Err(VpHaltReason::TripleFault {
+        Err(VpHaltReasonKind::TripleFault {
             vtl: self.state.active_vtl,
-        })
+        }
+        .into())
     }
 
     fn sints_deliverable(&mut self, vtl: Vtl, sints: u16) {
@@ -553,6 +555,7 @@ mod x86 {
     use thiserror::Error;
     use virt::LateMapVtl0MemoryPolicy;
     use virt::VpHaltReason;
+    use virt::VpHaltReasonKind;
     use virt::io::CpuIo;
     use virt::state::StateElement;
     use virt::x86::MsrError;
@@ -628,7 +631,7 @@ mod x86 {
                     &mut self.state.exits.other
                 }
                 ExitReason::InvalidVpRegisterValue => {
-                    return Err(VpHaltReason::InvalidVmState(InvalidVpState.into()));
+                    return Err(VpHaltReasonKind::InvalidVmState(InvalidVpState.into()).into());
                 }
                 ExitReason::Halt => {
                     self.handle_halt(exit);
@@ -855,7 +858,9 @@ mod x86 {
                         .vtl0_deferred_policy
                     {
                         LateMapVtl0MemoryPolicy::Halt => {
-                            return Err(VpHaltReason::InvalidVmState(DeferredRamAccess.into()));
+                            return Err(
+                                VpHaltReasonKind::InvalidVmState(DeferredRamAccess.into()).into()
+                            );
                         }
                         LateMapVtl0MemoryPolicy::Log => {}
                         LateMapVtl0MemoryPolicy::InjectException => {
@@ -1699,6 +1704,7 @@ mod aarch64 {
     use hvdef::HvMessageType;
     use hvdef::Vtl;
     use virt::VpHaltReason;
+    use virt::VpHaltReasonKind;
     use virt::io::CpuIo;
 
     fn message_ref<T: hvdef::MessagePayload>(v: &whp::abi::WHV_RUN_VP_EXIT_CONTEXT_u) -> &T {
@@ -1809,9 +1815,10 @@ mod aarch64 {
                 ExceptionClass::DATA_ABORT_LOWER => {
                     let iss = IssDataAbort::from(syndrome.iss());
                     if !iss.isv() {
-                        return Err(VpHaltReason::EmulationFailure(
+                        return Err(VpHaltReasonKind::EmulationFailure(
                             anyhow::anyhow!("can't handle data abort without isv: {iss:?}").into(),
-                        ));
+                        )
+                        .into());
                     }
                     let len = 1 << iss.sas();
                     let sign_extend = iss.sse();
@@ -1847,9 +1854,10 @@ mod aarch64 {
                         .unwrap();
                 }
                 ec => {
-                    return Err(VpHaltReason::EmulationFailure(
+                    return Err(VpHaltReasonKind::EmulationFailure(
                         anyhow::anyhow!("unknown memory access exception: {ec:?}").into(),
-                    ));
+                    )
+                    .into());
                 }
             }
             Ok(())
@@ -1858,10 +1866,11 @@ mod aarch64 {
         /// Handle a reset from the hypervisor-handled PSCI call.
         fn handle_reset(&mut self, info: &hvdef::HvArm64ResetInterceptMessage) -> VpHaltReason {
             match info.reset_type {
-                hvdef::HvArm64ResetType::POWER_OFF => VpHaltReason::PowerOff,
-                hvdef::HvArm64ResetType::REBOOT => VpHaltReason::Reset,
+                hvdef::HvArm64ResetType::POWER_OFF => VpHaltReasonKind::PowerOff,
+                hvdef::HvArm64ResetType::REBOOT => VpHaltReasonKind::Reset,
                 ty => unreachable!("unexpected reset type: {ty:?}",),
             }
+            .into()
         }
 
         pub(super) fn finish_reset_arch(&mut self, vtl: Vtl) {

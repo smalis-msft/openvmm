@@ -50,6 +50,7 @@ use inspect::InspectMut;
 use inspect_counters::Counter;
 use virt::Processor;
 use virt::VpHaltReason;
+use virt::VpHaltReasonKind;
 use virt::VpIndex;
 use virt::io::CpuIo;
 use virt::state::StateElement;
@@ -1217,7 +1218,7 @@ impl UhProcessor<'_, SnpBacked> {
         let mut has_intercept = self
             .runner
             .run()
-            .map_err(|e| VpHaltReason::Hypervisor(SnpRunVpError(e).into()))?;
+            .map_err(|e| VpHaltReasonKind::Hypervisor(SnpRunVpError(e).into()))?;
 
         let entered_from_vtl = next_vtl;
         let mut vmsa = self.runner.vmsa_mut(entered_from_vtl);
@@ -1396,9 +1397,10 @@ impl UhProcessor<'_, SnpBacked> {
             }
 
             SevExitCode::SHUTDOWN => {
-                return Err(VpHaltReason::TripleFault {
+                return Err(VpHaltReasonKind::TripleFault {
                     vtl: entered_from_vtl.into(),
-                });
+                }
+                .into());
             }
 
             SevExitCode::WBINVD | SevExitCode::INVD => {
@@ -1480,7 +1482,7 @@ impl UhProcessor<'_, SnpBacked> {
             }
 
             SevExitCode::INVALID_VMCB => {
-                return Err(VpHaltReason::InvalidVmState(InvalidVmcb.into()));
+                return Err(VpHaltReasonKind::InvalidVmState(InvalidVmcb.into()).into());
             }
 
             SevExitCode::INVLPGB | SevExitCode::ILLEGAL_INVLPGB => {
@@ -1520,7 +1522,7 @@ impl UhProcessor<'_, SnpBacked> {
                 match self.runner.exit_message().header.typ {
                     HvMessageType::HvMessageTypeX64SevVmgexitIntercept => {
                         self.handle_vmgexit(dev, entered_from_vtl)
-                            .map_err(|e| VpHaltReason::InvalidVmState(e.into()))?;
+                            .map_err(|e| VpHaltReasonKind::InvalidVmState(e.into()))?;
                     }
                     _ => has_intercept = true,
                 }

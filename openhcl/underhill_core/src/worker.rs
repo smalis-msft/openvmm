@@ -3027,6 +3027,9 @@ async fn new_underhill_vm(
         ),
     );
 
+    #[cfg(not(debug_assertions))]
+    virt::PANIC_ON_FAILURE_CONSTRUCTION.store(true, std::sync::atomic::Ordering::Relaxed);
+
     let (mut partition_unit, vp_runners) = PartitionUnit::new(
         tp,
         state_units
