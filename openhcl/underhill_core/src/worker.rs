@@ -3067,7 +3067,16 @@ async fn new_underhill_vm(
     }
 
     let (chipset, devices) = chipset_builder.build()?;
-    let chipset = vmm_core::vmotherboard_adapter::ChipsetPlusSynic::new(synic.clone(), chipset);
+    let fatal_error_policy = if env_cfg.halt_on_guest_halt {
+        vmm_core::vmotherboard_adapter::FatalErrorPolicy::DebugBreak
+    } else {
+        vmm_core::vmotherboard_adapter::FatalErrorPolicy::Panic
+    };
+    let chipset = vmm_core::vmotherboard_adapter::ChipsetPlusSynic::new(
+        synic.clone(),
+        chipset,
+        fatal_error_policy,
+    );
 
     let control_send = Arc::new(Mutex::new(Some(control_send)));
     let (halt_notify_send, halt_notify_recv) = mesh::channel();
@@ -3333,7 +3342,6 @@ async fn halt_task(
         Reset,
         Hibernate,
         TripleFault { vp: u32, regs: Vec<RegisterState> },
-        Panic { string: String },
     }
 
     while let Ok(reason) = halt_notify_recv.recv().await {
@@ -3347,20 +3355,6 @@ async fn halt_task(
                 HaltRequest::TripleFault {
                     vp,
                     regs: reg_state,
-                }
-            }
-            HaltReason::InvalidVmState { vp } => {
-                // Panic so that the VM reboots back to the host,
-                // hopefully with enough context to debug things.
-                HaltRequest::Panic {
-                    string: format!("invalid vm state on vp {}", vp),
-                }
-            }
-            HaltReason::VpError { vp } => {
-                // Panic so that the VM reboots back to the host,
-                // hopefully with enough context to debug things.
-                HaltRequest::Panic {
-                    string: format!("vp error on vp {}", vp),
                 }
             }
             // Debug halts require no further processing, loop back around.
@@ -3400,7 +3394,6 @@ async fn halt_task(
                 HaltRequest::TripleFault { vp, regs } => {
                     get_client.triple_fault(vp, TripleFaultType::UNRECOVERABLE_EXCEPTION, regs)
                 }
-                HaltRequest::Panic { string } => panic!("{}", string),
             }
         }
     }
