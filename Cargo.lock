@@ -592,6 +592,7 @@ dependencies = [
  "guest_emulation_transport",
  "guestmem",
  "inspect",
+ "membacking",
  "mesh",
  "mesh_worker",
  "pal_async",

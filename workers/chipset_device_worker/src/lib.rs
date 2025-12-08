@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 use chipset_device::io::IoError;
+use membacking::GuestMemoryClient;
 use mesh::MeshPayload;
 use mesh::rpc::Rpc;
 use mesh_worker::WorkerHost;
@@ -30,6 +31,13 @@ pub struct RemoteChipsetDeviceHandle {
     pub device: Resource<ChipsetDeviceHandleKind>,
     /// The worker host to launch the worker in.
     pub worker_host: WorkerHost,
+    /// Guest memory client for untrusted device DMA operations.
+    /// If None, the device will receive empty guest memory.
+    pub guest_memory_client: Option<GuestMemoryClient>,
+    /// Guest memory client for trusted device DMA operations.
+    /// If None, the device will receive empty guest memory.
+    /// For non-CVMs, this should be the same as `guest_memory_client`.
+    pub encrypted_guest_memory_client: Option<GuestMemoryClient>,
 }
 
 impl ResourceId<ChipsetDeviceHandleKind> for RemoteChipsetDeviceHandle {

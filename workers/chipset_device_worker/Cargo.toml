@@ -16,6 +16,7 @@ guest_emulation_transport.workspace = true
 vmgs_broker.workspace = true
 
 guestmem.workspace = true
+membacking.workspace = true
 inspect.workspace = true
 mesh.workspace = true
 mesh_worker.workspace = true

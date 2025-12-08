@@ -1163,6 +1163,8 @@ impl PetriVmConfigSetupCore<'_> {
                     }
                     .into_resource(),
                     worker_host: self.make_device_worker("tpm").await?,
+                    guest_memory_client: None,
+                    encrypted_guest_memory_client: None,
                 }
                 .into_resource(),
             }))

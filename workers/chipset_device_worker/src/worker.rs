@@ -69,6 +69,8 @@ pub(crate) struct RemoteChipsetDeviceHandleParams {
     pub device_name: String,
     pub is_restoring: bool,
     pub vmtime: vmcore::vmtime::VmTimeSourceBuilder,
+    pub guest_memory_client: Option<membacking::GuestMemoryClient>,
+    pub encrypted_guest_memory_client: Option<membacking::GuestMemoryClient>,
 }
 
 /// The chipset device worker.
@@ -125,14 +127,29 @@ impl Worker for RemoteChipsetDeviceWorker {
         let driver = pool.driver();
         let mut device = pool
             .run_until(async move {
+                // Create guest memory instances from the clients, or use empty memory if not provided
+                let guest_memory = match inputs.guest_memory_client {
+                    Some(client) => client
+                        .guest_memory()
+                        .await
+                        .context("failed to create guest memory")?,
+                    None => GuestMemory::empty(),
+                };
+                let encrypted_guest_memory = match inputs.encrypted_guest_memory_client {
+                    Some(client) => client
+                        .guest_memory()
+                        .await
+                        .context("failed to create encrypted guest memory")?,
+                    None => GuestMemory::empty(),
+                };
+
                 resolver
                     .resolve(
                         device,
                         ResolveChipsetDeviceHandleParams {
                             device_name: &inputs.device_name,
-                            // TODO Create a guest memory proxy
-                            guest_memory: &GuestMemory::empty(),
-                            encrypted_guest_memory: &GuestMemory::empty(),
+                            guest_memory: &guest_memory,
+                            encrypted_guest_memory: &encrypted_guest_memory,
                             vmtime: &inputs
                                 .vmtime
                                 .build(&driver)

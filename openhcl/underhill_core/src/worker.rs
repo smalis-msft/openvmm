@@ -2877,6 +2877,8 @@ async fn new_underhill_vm(
                 worker_host: control_send
                     .call_failable(ControlRequest::MakeWorker, "tpm".into())
                     .await?,
+                guest_memory_client: None,
+                encrypted_guest_memory_client: None,
             }
             .into_resource(),
         });

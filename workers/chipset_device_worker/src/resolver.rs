@@ -54,6 +54,8 @@ impl AsyncResolveResource<ChipsetDeviceHandleKind, RemoteChipsetDeviceHandle>
         let RemoteChipsetDeviceHandle {
             device,
             worker_host,
+            guest_memory_client,
+            encrypted_guest_memory_client,
         } = resource;
 
         let (req_send, req_recv) = mesh::channel();
@@ -83,6 +85,8 @@ impl AsyncResolveResource<ChipsetDeviceHandleKind, RemoteChipsetDeviceHandle>
                         device_name: input.device_name.to_string(),
                         vmtime: input.vmtime.builder().clone(),
                         is_restoring: input.is_restoring,
+                        guest_memory_client,
+                        encrypted_guest_memory_client,
                     },
                     req_recv,
                     resp_send,

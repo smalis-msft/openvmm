@@ -1104,6 +1104,8 @@ async fn vm_config_from_command_line(
                 }
                 .into_resource(),
                 worker_host: mesh.make_host("tpm", None).await?,
+                guest_memory_client: None,
+                encrypted_guest_memory_client: None,
             }
             .into_resource(),
         });
