@@ -252,7 +252,6 @@ impl Worker for RemoteChipsetDeviceWorker {
                             deferred.inspect(&mut self.device);
                         }
                         WorkerRpc::Stop => {
-                            // TODO: Stop the device?
                             return Ok(());
                         }
                         WorkerRpc::Restart(_response) => {
@@ -260,14 +259,13 @@ impl Worker for RemoteChipsetDeviceWorker {
                         }
                     },
                     WorkerEvent::DeviceRequest(req) => match req {
-                        // TODO any self management?
                         DeviceRequest::Start => self.device.start(),
                         DeviceRequest::Stop(rpc) => {
-                            // TODO any self management?
                             rpc.handle(async |()| self.device.stop().await).await
                         }
                         DeviceRequest::Reset(rpc) => {
-                            // TODO any self management?
+                            self.deferred_reads.clear();
+                            self.deferred_writes.clear();
                             rpc.handle(async |()| self.device.reset().await).await
                         }
 

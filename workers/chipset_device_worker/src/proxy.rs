@@ -247,17 +247,16 @@ impl PollDevice for ChipsetDeviceProxy {
 
 impl ChangeDeviceState for ChipsetDeviceProxy {
     fn start(&mut self) {
-        // TODO any self management?
         self.req_send.send(DeviceRequest::Start)
     }
 
     async fn stop(&mut self) {
-        // TODO any self management?
         self.req_send.call(DeviceRequest::Stop, ()).await.unwrap()
     }
 
     async fn reset(&mut self) {
-        // TODO any self management?
+        self.in_flight_reads.clear();
+        self.in_flight_writes.clear();
         self.req_send.call(DeviceRequest::Reset, ()).await.unwrap()
     }
 }
