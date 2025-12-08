@@ -5271,6 +5271,7 @@ version = "0.0.0"
 dependencies = [
  "build_rs_guest_arch",
  "chipset",
+ "chipset_device_worker",
  "debug_worker",
  "disk_striped",
  "hyperv_ic",
@@ -5655,6 +5656,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blocking",
+ "chipset_device_worker",
  "chipset_resources",
  "clap",
  "diag_client",
@@ -7945,6 +7947,7 @@ dependencies = [
  "chipset",
  "chipset_device",
  "chipset_device_resources",
+ "chipset_device_worker",
  "chipset_legacy",
  "closeable_mutex",
  "cvm_tracing",

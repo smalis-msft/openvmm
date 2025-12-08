@@ -197,6 +197,7 @@ pub(crate) struct LoadedVm {
     pub mana_keep_alive: KeepAliveConfig,
     pub test_configuration: Option<TestScenarioConfig>,
     pub dma_manager: OpenhclDmaManager,
+    pub device_mesh: mesh_process::Mesh,
 }
 
 pub struct LoadedVmState<T> {
@@ -354,6 +355,7 @@ impl LoadedVm {
                         resp.field("vmbus_filter", &self.vmbus_filter);
                         resp.field("vpci_relay", &self.vpci_relay);
                         resp.field("mana_keepalive_mode", &self.mana_keep_alive);
+                        resp.field("device_mesh", &self.device_mesh);
                     }),
                 },
                 Event::Vtl2ConfigNicRpc(message) => {

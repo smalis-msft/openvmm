@@ -60,6 +60,7 @@ use crate::wrapped_partition::WrappedPartition;
 use anyhow::Context;
 use async_trait::async_trait;
 use chipset_device::ChipsetDevice;
+use chipset_device_worker::RemoteChipsetDeviceHandle;
 use closeable_mutex::CloseableMutex;
 use cvm_tracing::CVM_ALLOWED;
 use debug_ptr::DebugPtr;
@@ -2633,6 +2634,8 @@ async fn new_underhill_vm(
         .build()
         .context("failed to build chipset configuration")?;
 
+    let device_mesh = mesh_process::Mesh::new("device_mesh".into())?;
+
     let deps_generic_ioapic = chipset.with_generic_ioapic.then(|| dev::GenericIoApicDeps {
         num_entries: virt::irqcon::IRQ_LINES as u8,
         routing: Box::new(vmm_core::emuplat::ioapic::IoApicRouting(
@@ -2858,18 +2861,22 @@ async fn new_underhill_vm(
 
         chipset_devices.push(ChipsetDeviceHandle {
             name: "tpm".to_owned(),
-            resource: TpmDeviceHandle {
-                ppi_store,
-                nvram_store,
-                refresh_tpm_seeds: platform_attestation_data
-                    .host_attestation_settings
-                    .refresh_tpm_seeds,
-                ak_cert_type,
-                register_layout,
-                guest_secret_key: platform_attestation_data.guest_secret_key,
-                logger: Some(GetTpmLoggerHandle.into_resource()),
-                is_confidential_vm: isolation.is_isolated(),
-                bios_guid: dps.general.bios_guid,
+            resource: RemoteChipsetDeviceHandle {
+                device: TpmDeviceHandle {
+                    ppi_store,
+                    nvram_store,
+                    refresh_tpm_seeds: platform_attestation_data
+                        .host_attestation_settings
+                        .refresh_tpm_seeds,
+                    ak_cert_type,
+                    register_layout,
+                    guest_secret_key: platform_attestation_data.guest_secret_key,
+                    logger: Some(GetTpmLoggerHandle.into_resource()),
+                    is_confidential_vm: isolation.is_isolated(),
+                    bios_guid: dps.general.bios_guid,
+                }
+                .into_resource(),
+                worker_host: crate::launch_mesh_host(&device_mesh, "tpm", None).await?,
             }
             .into_resource(),
         });
@@ -3544,6 +3551,7 @@ async fn new_underhill_vm(
         mana_keep_alive: env_cfg.mana_keep_alive,
         test_configuration: env_cfg.test_configuration,
         dma_manager,
+        device_mesh,
     };
 
     Ok(loaded_vm)
