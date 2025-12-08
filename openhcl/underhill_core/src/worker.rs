@@ -2634,8 +2634,6 @@ async fn new_underhill_vm(
         .build()
         .context("failed to build chipset configuration")?;
 
-    let device_mesh = mesh_process::Mesh::new("device_mesh".into())?;
-
     let deps_generic_ioapic = chipset.with_generic_ioapic.then(|| dev::GenericIoApicDeps {
         num_entries: virt::irqcon::IRQ_LINES as u8,
         routing: Box::new(vmm_core::emuplat::ioapic::IoApicRouting(
@@ -2876,7 +2874,9 @@ async fn new_underhill_vm(
                     bios_guid: dps.general.bios_guid,
                 }
                 .into_resource(),
-                worker_host: crate::launch_mesh_host(&device_mesh, "tpm", None).await?,
+                worker_host: control_send
+                    .call_failable(ControlRequest::MakeDeviceWorker, "tpm".into())
+                    .await?,
             }
             .into_resource(),
         });
@@ -3551,7 +3551,6 @@ async fn new_underhill_vm(
         mana_keep_alive: env_cfg.mana_keep_alive,
         test_configuration: env_cfg.test_configuration,
         dma_manager,
-        device_mesh,
     };
 
     Ok(loaded_vm)
