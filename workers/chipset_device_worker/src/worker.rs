@@ -114,6 +114,7 @@ impl Worker for RemoteChipsetDeviceWorker {
         } = params;
 
         let mut resolver = ResourceResolver::new();
+        #[cfg(target_os = "linux")]
         if let Some(get) = dyn_resolvers.get {
             resolver.add_resolver(get);
         }
