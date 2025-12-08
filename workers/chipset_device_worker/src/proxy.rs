@@ -72,7 +72,7 @@ struct PioProxy {
 
 #[derive(Inspect)]
 struct PciProxy {
-    #[inspect(skip)] // TODO
+    #[inspect(with = "Option::is_some")]
     suggested_bdf: Option<(u8, u8, u8)>,
 }
 

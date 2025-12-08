@@ -23,10 +23,8 @@ pal_async.workspace = true
 
 anyhow.workspace = true
 async-trait.workspace = true
-futures.workspace = true
 slab.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [lints]
 workspace = true

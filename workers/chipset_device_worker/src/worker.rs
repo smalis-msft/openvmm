@@ -55,6 +55,8 @@ pub struct RemoteChipsetDeviceWorkerParameters {
 
 // FUTURE: Create a way to store a Vec of all registered dynamic resolvers
 // and transfer them, instead of maintaining a list of just a few.
+// TODO: This should be passed in from the hosting VMM, since something like the
+// GET doesn't make sense for openvmm.
 #[derive(MeshPayload)]
 pub(crate) struct RemoteDynamicResolvers {
     pub get: Option<guest_emulation_transport::GuestEmulationTransportClient>,
@@ -138,7 +140,7 @@ impl Worker for RemoteChipsetDeviceWorker {
                             task_driver_source: &vmcore::vm_task::VmTaskDriverSource::new(
                                 vmcore::vm_task::thread::ThreadDriverBackend::new(driver),
                             ),
-                            // TODO and static regions
+                            // TODO
                             configure: &mut configure::RemoteConfigureChipsetDevice {},
                             register_mmio: &mut configure::RemoteRegisterMmio {},
                             register_pio: &mut configure::RemoteRegisterPio {},
@@ -186,7 +188,7 @@ impl Worker for RemoteChipsetDeviceWorker {
         })
     }
 
-    fn restart(state: Self::State) -> anyhow::Result<Self> {
+    fn restart(_state: Self::State) -> anyhow::Result<Self> {
         todo!()
     }
 
@@ -251,7 +253,7 @@ impl Worker for RemoteChipsetDeviceWorker {
                             // TODO: Stop the device?
                             return Ok(());
                         }
-                        WorkerRpc::Restart(response) => {
+                        WorkerRpc::Restart(_response) => {
                             todo!();
                         }
                     },
