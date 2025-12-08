@@ -130,7 +130,7 @@ impl Worker for RemoteChipsetDeviceWorker {
                         device,
                         ResolveChipsetDeviceHandleParams {
                             device_name: &inputs.device_name,
-                            // TODO
+                            // TODO Create a guest memory proxy
                             guest_memory: &GuestMemory::empty(),
                             encrypted_guest_memory: &GuestMemory::empty(),
                             vmtime: &inputs
