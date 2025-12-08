@@ -447,7 +447,7 @@ enum ControlState {
 #[derive(MeshPayload)]
 pub enum ControlRequest {
     FlushLogs(Rpc<CancelContext, Result<(), CancelReason>>),
-    MakeDeviceWorker(Rpc<String, Result<WorkerHost, RemoteError>>),
+    MakeWorker(Rpc<String, Result<WorkerHost, RemoteError>>),
 }
 
 async fn run_control(
@@ -754,7 +754,7 @@ async fn run_control(
                     })
                     .await
                 }
-                ControlRequest::MakeDeviceWorker(rpc) => {
+                ControlRequest::MakeWorker(rpc) => {
                     rpc.handle_failable(async |name| {
                         launch_mesh_host(mesh, &name, Some(tracing.tracer())).await
                     })

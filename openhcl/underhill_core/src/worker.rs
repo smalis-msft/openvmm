@@ -2875,7 +2875,7 @@ async fn new_underhill_vm(
                 }
                 .into_resource(),
                 worker_host: control_send
-                    .call_failable(ControlRequest::MakeDeviceWorker, "tpm".into())
+                    .call_failable(ControlRequest::MakeWorker, "tpm".into())
                     .await?,
             }
             .into_resource(),
