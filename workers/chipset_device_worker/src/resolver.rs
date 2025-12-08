@@ -66,6 +66,7 @@ impl AsyncResolveResource<ChipsetDeviceHandleKind, RemoteChipsetDeviceHandle>
                 RemoteChipsetDeviceWorkerParameters {
                     device,
                     dyn_resolvers: RemoteDynamicResolvers {
+                        #[cfg(target_os = "linux")]
                         get: resolver
                             .resolve::<guest_emulation_transport::resolver::GetClientKind, _>(
                                 PlatformResource.into_resource(),

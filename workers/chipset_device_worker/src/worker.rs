@@ -59,6 +59,7 @@ pub struct RemoteChipsetDeviceWorkerParameters {
 // GET doesn't make sense for openvmm.
 #[derive(MeshPayload)]
 pub(crate) struct RemoteDynamicResolvers {
+    #[cfg(target_os = "linux")]
     pub get: Option<guest_emulation_transport::GuestEmulationTransportClient>,
     pub vmgs: Option<vmgs_broker::VmgsClient>,
 }
@@ -222,10 +223,10 @@ impl Worker for RemoteChipsetDeviceWorker {
                         .for_each(|_| ());
 
                     self.deferred_writes
-                        .extract_if(.., |read| match read.token.poll_write(cx) {
+                        .extract_if(.., |write| match write.token.poll_write(cx) {
                             Poll::Ready(r) => {
                                 self.resp_send.send(DeviceResponse::Write {
-                                    id: read.id,
+                                    id: write.id,
                                     result: r,
                                 });
                                 true
