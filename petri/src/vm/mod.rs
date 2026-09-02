@@ -2130,29 +2130,15 @@ impl<T: PetriVmmBackend> PetriVm<T> {
                 .wait_for_boot_event(self.vmm_quirks.flaky_boot)
                 .await?
             {
-                Ok(res) => break res?,
-                Err(_) => {
-                    tracing::error!("Did not get boot event in required time, resetting...");
-                    if let Some(inspector) = self.runtime.inspector() {
-                        collect_inspect(
-                            "vmm",
-                            async move { inspector.inspect("").await },
-                            InspectSink::Attachment(&self.resources.log_source),
-                        )
-                        .await;
-                    }
-
-                    self.runtime.reset().await?;
-                    continue;
-                }
+                break event;
             }
 
             tracing::error!("Did not get boot event in required time, resetting...");
             if let Some(inspector) = self.runtime.inspector() {
-                save_inspect(
+                collect_inspect(
                     "vmm",
                     Box::pin(async move { inspector.inspect("").await }),
-                    &self.resources.log_source,
+                    InspectSink::Attachment(&self.resources.log_source),
                 )
                 .await;
             }
