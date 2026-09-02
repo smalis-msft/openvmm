@@ -200,7 +200,7 @@ pub struct PetriVmBuilder<T: PetriVmmBackend> {
     inspect_snapshots: Option<InspectBuffer>,
 }
 
-type InspectBuffer = Arc<Mutex<BTreeMap<&'static str, String>>>;
+type InspectBuffer = Arc<Mutex<BTreeMap<&'static str, inspect::Node>>>;
 
 /// How long to wait on a single inspect before giving up on it.
 const INSPECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -446,9 +446,6 @@ struct PetriVmRuntimeGuard<T: PetriVmRuntime> {
     runtime: Option<T>,
     driver: DefaultDriver,
     snapshots: Option<InspectBuffer>,
-    /// Temporary disk files that must outlive the VMM process, whose teardown
-    /// is deferred along with the runtime.
-    temp_disks: Vec<Arc<TempPath>>,
 }
 
 impl<T: PetriVmRuntime> PetriVmRuntimeGuard<T> {
@@ -507,8 +504,6 @@ impl<T: PetriVmRuntime> Drop for PetriVmRuntimeGuard<T> {
             drop(runtime);
         };
 
-        let temp_disks = std::mem::take(&mut self.temp_disks);
-
         // `SimpleTest::new_async` joins the test body with the task pool, so
         // the pool keeps polling detached tasks until they complete. This
         // finishes before the post-test hooks run.
@@ -516,28 +511,12 @@ impl<T: PetriVmRuntime> Drop for PetriVmRuntimeGuard<T> {
             .spawn("petri-inspect-on-drop", async move {
                 // A panic here would propagate out of the task pool and replace
                 // the failure the test is already reporting.
-                if AssertUnwindSafe(capture).catch_unwind().await.is_err() {
-                    tracing::error!("panicked while collecting inspect state");
+                if let Err(e) = AssertUnwindSafe(capture).catch_unwind().await {
+                    tracing::error!(?e, "panicked while collecting inspect state");
                 }
-                // Only safe to delete once the VMM process is gone.
-                drop(temp_disks);
             })
             .detach();
     }
-}
-
-/// The temporary disk files backing the VM.
-fn temp_disks(config: &PetriVmRuntimeConfig) -> Vec<Arc<TempPath>> {
-    config
-        .vmbus_storage_controllers
-        .values()
-        .flat_map(|c| c.drives.values())
-        .chain(config.ide_controllers.iter().flatten().flatten().flatten())
-        .filter_map(|drive| match &drive.disk {
-            Some(Disk::Temporary(path)) => Some(path.clone()),
-            _ => None,
-        })
-        .collect()
 }
 
 impl<T: PetriVmmBackend> PetriVmBuilder<T> {
@@ -564,8 +543,6 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             } => BootDeviceType::None,
             Firmware::Uefi { .. } | Firmware::OpenhclUefi { .. } => BootDeviceType::Scsi,
         };
-
-        let post_test_hooks = params.post_test_hooks;
 
         Ok(Self {
             backend: artifacts.backend,
@@ -614,8 +591,8 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             inspect_snapshots: Some(InspectBuffer::default()),
         }
         .add_petri_scsi_controllers()
-        .add_guest_crash_disk(post_test_hooks)
-        .save_inspect_state_on_failure(post_test_hooks))
+        .add_guest_crash_disk(params.post_test_hooks)
+        .save_inspect_state_on_failure(params.post_test_hooks))
     }
 
     /// Create a minimal VM builder with only the bare minimum device set.
@@ -941,7 +918,7 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
                 for (name, node) in snapshots.lock().iter() {
                     logger.write_attachment(
                         &format!("failure_inspect_{name}.log"),
-                        node.as_bytes(),
+                        format!("{node:#}").as_bytes(),
                     )?;
                 }
                 Ok(())
@@ -1272,7 +1249,6 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
                 runtime: Some(runtime),
                 driver: self.resources.driver.clone(),
                 snapshots: self.inspect_snapshots,
-                temp_disks: temp_disks(&config),
             },
             resources: self.resources,
             watchdog_tasks,
@@ -3630,7 +3606,7 @@ async fn collect_inspect(
             }
         }
         InspectSink::Buffer(snapshots) => {
-            snapshots.lock().insert(name, format!("{node:#}"));
+            snapshots.lock().insert(name, node);
         }
     }
 }
