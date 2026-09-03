@@ -550,6 +550,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cca_tests"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "petri",
+ "petri_artifact_resolver_openvmm_known_paths",
+ "petri_artifacts_vmm_test",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,6 +2371,7 @@ dependencies = [
  "powershell_builder",
  "serde",
  "serde_json",
+ "sha2",
  "target-lexicon",
  "tempfile",
  "toml_edit",
@@ -3975,7 +3988,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -4563,7 +4576,7 @@ dependencies = [
  "proc-macro2",
  "prost-build",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -4605,7 +4618,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -5996,6 +6009,7 @@ dependencies = [
  "build_rs_guest_arch",
  "fs-err",
  "hypervisor_resources",
+ "test_with_tracing",
  "virt_mshv",
  "virt_whp",
  "vm_resource",
@@ -6209,7 +6223,7 @@ version = "0.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -6775,6 +6789,7 @@ name = "prep_steps"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "fs-err",
  "gptman",
  "guid",
  "openvmm_defs",
@@ -7251,7 +7266,7 @@ name = "save_restore_derive"
 version = "0.0.0"
 dependencies = [
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -7822,6 +7837,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "snp_bootshim"
+version = "0.0.0"
+dependencies = [
+ "loader_defs",
+ "minimal_rt",
+ "minimal_rt_build",
+ "x86defs",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8057,7 +8082,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "symcrypt"
 version = "0.6.0"
-source = "git+https://github.com/microsoft/rust-symcrypt.git?branch=release%2F0.6.0#2d83888206139cb8cc522ea3617a1870674ac8a0"
+source = "git+https://github.com/microsoft/rust-symcrypt.git?rev=2d83888206139cb8cc522ea3617a1870674ac8a0#2d83888206139cb8cc522ea3617a1870674ac8a0"
 dependencies = [
  "libc",
  "symcrypt-sys",
@@ -8066,7 +8091,7 @@ dependencies = [
 [[package]]
 name = "symcrypt-sys"
 version = "0.4.0"
-source = "git+https://github.com/microsoft/rust-symcrypt.git?branch=release%2F0.6.0#2d83888206139cb8cc522ea3617a1870674ac8a0"
+source = "git+https://github.com/microsoft/rust-symcrypt.git?rev=2d83888206139cb8cc522ea3617a1870674ac8a0#2d83888206139cb8cc522ea3617a1870674ac8a0"
 dependencies = [
  "libc",
 ]
@@ -8087,6 +8112,17 @@ name = "syn"
 version = "2.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8273,7 +8309,7 @@ version = "0.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -8357,7 +8393,7 @@ name = "tmk_macros"
 version = "0.0.0"
 dependencies = [
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -9606,6 +9642,7 @@ dependencies = [
  "hvdef",
  "inspect",
  "libc",
+ "memory_range",
  "mshv-bindings",
  "mshv-ioctls",
  "pal",
@@ -9613,6 +9650,7 @@ dependencies = [
  "parking_lot",
  "pci_core",
  "signal-hook",
+ "test_with_tracing",
  "thiserror 2.0.16",
  "tracelimit",
  "tracing",
@@ -10599,7 +10637,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -10663,6 +10701,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmm_perf"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fs-err",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+ "test_with_tracing",
+ "tracing",
+ "tracing-subscriber",
+ "whp",
+]
+
+[[package]]
 name = "vmm_test_igvm_agent"
 version = "0.0.0"
 dependencies = [
@@ -10689,7 +10745,7 @@ dependencies = [
  "petri_artifacts_vmm_test",
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn 3.0.4",
 ]
 
 [[package]]

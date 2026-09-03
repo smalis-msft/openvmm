@@ -118,6 +118,18 @@ pub enum LinuxDirectBootMode {
     Acpi,
 }
 
+/// Isolation-specific settings for Linux direct boot.
+#[derive(MeshPayload, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinuxIsolationConfig {
+    /// No isolation-specific loader configuration.
+    None,
+    /// AMD SEV-SNP loader configuration.
+    Snp {
+        /// Enables restricted interrupt injection in the SNP VMSA.
+        restricted_injection: bool,
+    },
+}
+
 #[derive(MeshPayload, Debug)]
 pub enum LoadMode {
     Linux {
@@ -125,6 +137,7 @@ pub enum LoadMode {
         initrd: Option<File>,
         cmdline: String,
         enable_serial: bool,
+        isolation: LinuxIsolationConfig,
         boot_mode: LinuxDirectBootMode,
     },
     Uefi {
@@ -142,10 +155,14 @@ pub enum LoadMode {
         enable_vmbus: bool,
         force_dma_bounce: bool,
         enable_hv: bool,
+        /// Whether the guest firmware should enable hibernation (S4) support.
+        hibernation_enabled: bool,
     },
     Pcat {
         firmware: RomFileLocation,
         boot_order: [PcatBootDevice; 4],
+        /// Whether the guest firmware should enable hibernation (S4) support.
+        hibernation_enabled: bool,
     },
     Igvm {
         file: File,

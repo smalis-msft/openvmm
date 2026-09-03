@@ -19,14 +19,14 @@ use petri_artifacts_common::tags::MachineArch;
 use petri_artifacts_common::tags::OsFlavor;
 #[cfg(target_os = "linux")]
 use petri_artifacts_vmm_test::artifacts::OPENVMM_VHOST_NATIVE;
-#[cfg(target_os = "linux")]
-use std::mem::size_of;
 use vmm_test_macros::openvmm_test;
 use vmm_test_macros::vmm_test;
 use vmm_test_macros::vmm_test_with;
 
 /// Test for the Windows DirectIO (`-net dio`) network backend.
 mod dio_nic;
+/// Guest hibernation and OpenHCL hibernate token tests.
+mod hibernate;
 /// Nested-virtualization test: Hyper-V role + DDA inside an OpenVMM guest.
 mod hyperv_nested;
 /// Tests for Hyper-V integration components.
@@ -440,7 +440,10 @@ async fn boot_nvme<T: PetriVmmBackend>(config: PetriVmBuilder<T>) -> anyhow::Res
             reason = "WHP lacks ARM64 VTL2 support",
             openvmm_openhcl_uefi_aarch64(vhd(ubuntu_2404_server_aarch64))
         ),
-        openvmm_openhcl_uefi_x64(vhd(windows_datacenter_core_2022_x64)),
+        unstable(
+            reason = "known WHP lost interrupt bug",
+            openvmm_openhcl_uefi_x64(vhd(windows_datacenter_core_2022_x64))
+        ),
         ignore(
             reason = "Linux initrd lacks a VPCI driver",
             openvmm_openhcl_uefi_x64(vhd(ubuntu_2504_server_x64))
@@ -565,10 +568,61 @@ async fn reboot_into_guest_vsm<T: PetriVmmBackend>(
     // Verify VBS is running
     let output = cmd!(shell, "systeminfo").output().await?;
     let output_str = String::from_utf8_lossy(&output.stdout);
-    assert!(output_str.contains("Virtualization-based security: Status: Running"));
-    let output_running = &output_str[output_str.find("Services Running:").unwrap()..];
-    assert!(output_running.contains("Credential Guard"));
-    assert!(output_running.contains("Hypervisor enforced Code Integrity"));
+    let services_running = output_str
+        .split_once("Services Running:")
+        .map_or("", |(_, rest)| rest);
+    if !output_str.contains("Virtualization-based security: Status: Running")
+        || !services_running.contains("Credential Guard")
+        || !services_running.contains("Hypervisor enforced Code Integrity")
+    {
+        let _ = cmd!(shell, "bcdedit.exe")
+            .args(["/enum", "{current}"])
+            .ignore_status()
+            .run()
+            .await;
+        let _ = cmd!(shell, "reg.exe")
+            .args([
+                "query",
+                "HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard",
+                "/s",
+            ])
+            .ignore_status()
+            .run()
+            .await;
+        let _ = cmd!(shell, "reg.exe")
+            .args([
+                "query",
+                "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
+                "/v",
+                "LsaCfgFlags",
+            ])
+            .ignore_status()
+            .run()
+            .await;
+        let _ = cmd!(shell, "wevtutil.exe")
+            .args([
+                "qe",
+                "Microsoft-Windows-DeviceGuard/Operational",
+                "/c:50",
+                "/rd:true",
+                "/f:text",
+            ])
+            .ignore_status()
+            .run()
+            .await;
+        let _ = cmd!(shell, "wevtutil.exe")
+            .args([
+                "qe",
+                "Microsoft-Windows-Kernel-Boot/Operational",
+                "/c:50",
+                "/rd:true",
+                "/f:text",
+            ])
+            .ignore_status()
+            .run()
+            .await;
+        anyhow::bail!("guest VSM did not start after reboot. systeminfo:\n{output_str}");
+    }
 
     agent.power_off().await?;
     vm.wait_for_clean_teardown().await?;
