@@ -139,7 +139,9 @@ pub struct GuestConfig {
     pub serial_tx_only: bool,
     /// Enable vmbus redirection.
     pub vmbus_redirection: bool,
-    /// TPM reference implementation version.
+    /// Whether to enable the TPM.
+    pub tpm_enabled: bool,
+    /// Optional TPM reference implementation version hint.
     #[inspect(debug)]
     pub tpm_version: Option<GetTpmVersion>,
     /// The encoded VTL2 settings document.
@@ -1390,7 +1392,7 @@ impl<T: RingMem + Unpin> GedChannel<T> {
                     enable_vmbus_redirector: state.config.com2,
                 },
                 enable_firmware_debugging,
-                enable_tpm: state.config.tpm_version.is_some(),
+                enable_tpm: state.config.tpm_enabled,
                 secure_boot_enabled: state.config.secure_boot_enabled,
                 secure_boot_template_id: match state.config.secure_boot_template {
                     SecureBootTemplateType::SECURE_BOOT_DISABLED => HclSecureBootTemplateId::None,

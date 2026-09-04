@@ -165,6 +165,8 @@ pub mod ged {
     /// The TPM reference implementation version to expose to the guest.
     #[derive(MeshPayload, Clone, Debug, Copy)]
     pub enum GedTpmVersion {
+        /// Enable the TPM without specifying a reference implementation version.
+        Unspecified,
         /// TPM reference implementation version 1.38
         V138,
         /// TPM reference implementation version 1.85

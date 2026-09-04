@@ -137,6 +137,8 @@ impl AsyncResolveResource<VmbusDeviceHandleKind, GuestEmulationDeviceHandle>
             None
         };
 
+        let (tpm_enabled, tpm_version) = resolve_tpm_config(resource.tpm_version);
+
         let device = GuestEmulationDevice::new(
             crate::GuestConfig {
                 firmware: match resource.firmware {
@@ -179,10 +181,8 @@ impl AsyncResolveResource<VmbusDeviceHandleKind, GuestEmulationDeviceHandle>
                 com2: resource.com2,
                 serial_tx_only: resource.serial_tx_only,
                 vmbus_redirection: resource.vmbus_redirection,
-                tpm_version: resource.tpm_version.map(|v| match v {
-                    GedTpmVersion::V185 => get_protocol::dps_json::GetTpmVersion::V185,
-                    GedTpmVersion::V138 => get_protocol::dps_json::GetTpmVersion::V138,
-                }),
+                tpm_enabled,
+                tpm_version,
                 vtl2_settings: resource.vtl2_settings,
                 secure_boot_enabled: resource.secure_boot_enabled,
                 secure_boot_template: match resource.secure_boot_template {
@@ -234,5 +234,41 @@ impl AsyncResolveResource<VmbusDeviceHandleKind, GuestEmulationDeviceHandle>
             resource.test_gsp_by_id,
         );
         Ok(SimpleDeviceWrapper::new(input.driver_source.simple(), device).into())
+    }
+}
+
+fn resolve_tpm_config(
+    version: Option<GedTpmVersion>,
+) -> (bool, Option<get_protocol::dps_json::GetTpmVersion>) {
+    match version {
+        None => (false, None),
+        Some(GedTpmVersion::Unspecified) => (true, None),
+        Some(GedTpmVersion::V138) => (true, Some(get_protocol::dps_json::GetTpmVersion::V138)),
+        Some(GedTpmVersion::V185) => (true, Some(get_protocol::dps_json::GetTpmVersion::V185)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_tpm_config;
+    use get_protocol::dps_json::GetTpmVersion;
+    use get_resources::ged::GedTpmVersion;
+    use test_with_tracing::test;
+
+    #[test]
+    fn tpm_config_mapping() {
+        assert!(matches!(resolve_tpm_config(None), (false, None)));
+        assert!(matches!(
+            resolve_tpm_config(Some(GedTpmVersion::Unspecified)),
+            (true, None)
+        ));
+        assert!(matches!(
+            resolve_tpm_config(Some(GedTpmVersion::V138)),
+            (true, Some(GetTpmVersion::V138))
+        ));
+        assert!(matches!(
+            resolve_tpm_config(Some(GedTpmVersion::V185)),
+            (true, Some(GetTpmVersion::V185))
+        ));
     }
 }

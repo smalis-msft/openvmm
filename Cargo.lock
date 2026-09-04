@@ -3115,6 +3115,7 @@ dependencies = [
  "smbios_defs",
  "task_control",
  "test_igvm_agent_lib",
+ "test_with_tracing",
  "thiserror 2.0.16",
  "tracelimit",
  "tracing",
@@ -5933,6 +5934,7 @@ dependencies = [
  "test_with_tracing",
  "thiserror 2.0.16",
  "tpm_resources",
+ "tpm_vmgs",
  "tracelimit",
  "tracing",
  "tracing-subscriber",
@@ -6101,6 +6103,7 @@ dependencies = [
  "serial_socket",
  "storvsp",
  "tpm_device",
+ "tpm_vmgs",
  "uidevices",
  "vhost_user_frontend",
  "virt_hvf",
@@ -6556,6 +6559,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.16",
  "tpm_resources",
+ "tpm_vmgs",
  "tracing",
  "tracing-subscriber",
  "uidevices_resources",
@@ -8665,7 +8669,22 @@ dependencies = [
  "inspect",
  "mesh",
  "vm_resource",
+]
+
+[[package]]
+name = "tpm_vmgs"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "mesh",
+ "test_with_tracing",
+ "thiserror 2.0.16",
+ "tpm_resources",
+ "tracing",
+ "vm_resource",
+ "vmgs_broker",
  "vmgs_format",
+ "vmgs_resources",
 ]
 
 [[package]]
@@ -9092,6 +9111,7 @@ dependencies = [
  "tpm_device",
  "tpm_protocol",
  "tpm_resources",
+ "tpm_vmgs",
  "tracelimit",
  "tracing",
  "tracing-subscriber",

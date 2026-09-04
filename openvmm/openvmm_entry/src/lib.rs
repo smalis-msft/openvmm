@@ -118,9 +118,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use storvsp_resources::ScsiControllerRequest;
+use tpm_resources::TpmDeviceConfig;
 use tpm_resources::TpmDeviceHandle;
 use tpm_resources::TpmRegisterLayout;
 use tpm_resources::TpmVersion;
+use tpm_vmgs::VmgsTpmDeviceConfigHandle;
 use uidevices_resources::SynthKeyboardHandle;
 use uidevices_resources::SynthMouseHandle;
 use uidevices_resources::SynthVideoHandle;
@@ -1572,8 +1574,9 @@ async fn vm_config_from_command_line(
                         .then(|| SharedFramebufferHandle.into_resource()),
                     guest_request_recv,
                     tpm_version: opt.tpm.map(|v| match v {
-                        TpmVersionCli::V138 => get_resources::ged::GedTpmVersion::V138,
-                        TpmVersionCli::V185 => get_resources::ged::GedTpmVersion::V185,
+                        None => get_resources::ged::GedTpmVersion::Unspecified,
+                        Some(TpmVersionCli::V138) => get_resources::ged::GedTpmVersion::V138,
+                        Some(TpmVersionCli::V185) => get_resources::ged::GedTpmVersion::V185,
                     }),
                     firmware_event_send: None,
                     secure_boot_enabled: opt.secure_boot,
@@ -1617,20 +1620,27 @@ async fn vm_config_from_command_line(
             TpmRegisterLayout::Mmio
         };
 
-        let tpm_version = match tpm_version {
-            TpmVersionCli::V138 => TpmVersion::V138,
-            TpmVersionCli::V185 => TpmVersion::V185,
+        let requested_version = match tpm_version {
+            None => None,
+            Some(TpmVersionCli::V138) => Some(TpmVersion::V138),
+            Some(TpmVersionCli::V185) => Some(TpmVersion::V185),
         };
 
-        let (ppi_store, nvram_store) = if opt.vmgs.is_some() {
+        let (ppi_store, config) = if opt.vmgs.is_some() {
             (
                 VmgsFileHandle::new(vmgs_format::FileId::TPM_PPI, true).into_resource(),
-                VmgsFileHandle::new(tpm_version.to_nvram_vmgs_file_id(), true).into_resource(),
+                TpmDeviceConfig::Dynamic(
+                    VmgsTpmDeviceConfigHandle { requested_version }.into_resource(),
+                ),
             )
         } else {
+            let version = requested_version.unwrap_or(TpmVersion::V185);
             (
                 EphemeralNonVolatileStoreHandle.into_resource(),
-                EphemeralNonVolatileStoreHandle.into_resource(),
+                TpmDeviceConfig::Fixed {
+                    version,
+                    nvram_store: EphemeralNonVolatileStoreHandle.into_resource(),
+                },
             )
         };
 
@@ -1638,9 +1648,8 @@ async fn vm_config_from_command_line(
             name: "tpm".to_string(),
             resource: chipset_device_worker_defs::RemoteChipsetDeviceHandle {
                 device: TpmDeviceHandle {
-                    version: tpm_version,
+                    config,
                     ppi_store,
-                    nvram_store,
                     nvram_size: None,
                     refresh_tpm_seeds: false,
                     ak_cert_type: tpm_resources::TpmAkCertTypeResource::None,

@@ -919,14 +919,10 @@ Examples:
     #[clap(long, requires("uefi"))]
     pub disable_frontpage: bool,
 
-    /// add a vtpm device, optionally selecting version 138 or 185 (default: 185)
-    #[clap(
-        long,
-        value_name = "VERSION",
-        num_args = 0..=1,
-        default_missing_value = "185"
-    )]
-    pub tpm: Option<TpmVersionCli>,
+    /// add a vtpm device, optionally selecting version 138 or 185
+    #[clap(long, value_name = "VERSION", num_args = 0..=1)]
+    #[expect(clippy::option_option)]
+    pub tpm: Option<Option<TpmVersionCli>>,
 
     /// the mesh worker host name.
     ///
@@ -5639,20 +5635,20 @@ mod tests {
         assert_eq!(opt.tpm, None);
 
         let opt = Options::try_parse_from(["openvmm", "--tpm"]).unwrap();
-        assert_eq!(opt.tpm, Some(TpmVersionCli::V185));
+        assert_eq!(opt.tpm, Some(None));
 
         let opt = Options::try_parse_from(["openvmm", "--tpm", "--uefi"]).unwrap();
-        assert_eq!(opt.tpm, Some(TpmVersionCli::V185));
+        assert_eq!(opt.tpm, Some(None));
         assert!(opt.uefi);
 
         let opt = Options::try_parse_from(["openvmm", "--tpm", "138"]).unwrap();
-        assert_eq!(opt.tpm, Some(TpmVersionCli::V138));
+        assert_eq!(opt.tpm, Some(Some(TpmVersionCli::V138)));
 
         let opt = Options::try_parse_from(["openvmm", "--tpm=185"]).unwrap();
-        assert_eq!(opt.tpm, Some(TpmVersionCli::V185));
+        assert_eq!(opt.tpm, Some(Some(TpmVersionCli::V185)));
 
         let opt = Options::try_parse_from(["openvmm", "--tpm", "1.38"]).unwrap();
-        assert_eq!(opt.tpm, Some(TpmVersionCli::V138));
+        assert_eq!(opt.tpm, Some(Some(TpmVersionCli::V138)));
 
         assert!(Options::try_parse_from(["openvmm", "--tpm", "137"]).is_err());
     }

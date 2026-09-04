@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "tpm_vmgs"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tpm_resources.workspace = true
+vm_resource.workspace = true
+vmgs_broker.workspace = true
+vmgs_format.workspace = true
+vmgs_resources.workspace = true
+
+mesh.workspace = true
+
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+test_with_tracing.workspace = true
+
+[lints]
+workspace = true

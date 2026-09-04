@@ -8,6 +8,7 @@
 use guid::Guid;
 use inspect::Inspect;
 use mesh::MeshPayload;
+use vm_resource::CanResolveTo;
 use vm_resource::Resource;
 use vm_resource::ResourceId;
 use vm_resource::ResourceKind;
@@ -17,12 +18,10 @@ use vm_resource::kind::NonVolatileStoreKind;
 /// A handle to a TPM device.
 #[derive(MeshPayload)]
 pub struct TpmDeviceHandle {
-    /// TPM reference implementation version
-    pub version: TpmVersion,
+    /// TPM implementation version and NVRAM store configuration.
+    pub config: TpmDeviceConfig,
     /// Non-volatile store for PPI (physical presence interface) data
     pub ppi_store: Resource<NonVolatileStoreKind>,
-    /// Non-volatile store for TPM NVRAM data
-    pub nvram_store: Resource<NonVolatileStoreKind>,
     /// Whether to refresh TPM seeds on init
     pub refresh_tpm_seeds: bool,
     /// Type of AK cert
@@ -45,6 +44,39 @@ impl ResourceId<ChipsetDeviceHandleKind> for TpmDeviceHandle {
     const ID: &'static str = "tpm";
 }
 
+/// Configuration for the TPM implementation and its NVRAM store.
+#[derive(MeshPayload)]
+pub enum TpmDeviceConfig {
+    /// Use a fixed TPM implementation version and NVRAM store.
+    Fixed {
+        /// TPM reference implementation version.
+        version: TpmVersion,
+        /// Non-volatile store for TPM NVRAM data.
+        nvram_store: Resource<NonVolatileStoreKind>,
+    },
+    /// Resolve the TPM implementation version and NVRAM store together.
+    Dynamic(Resource<TpmDeviceConfigKind>),
+}
+
+/// A resolved TPM implementation version and matching NVRAM store.
+pub struct ResolvedTpmDeviceConfig {
+    /// TPM reference implementation version.
+    pub version: TpmVersion,
+    /// Non-volatile store for TPM NVRAM data.
+    pub nvram_store: Resource<NonVolatileStoreKind>,
+}
+
+/// A resource kind for resolving a TPM implementation version and NVRAM store.
+pub enum TpmDeviceConfigKind {}
+
+impl ResourceKind for TpmDeviceConfigKind {
+    const NAME: &'static str = "tpm_device_config";
+}
+
+impl CanResolveTo<ResolvedTpmDeviceConfig> for TpmDeviceConfigKind {
+    type Input<'a> = &'a ();
+}
+
 /// Version of the Microsoft TPM reference implementation to use.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, MeshPayload)]
 pub enum TpmVersion {
@@ -52,16 +84,6 @@ pub enum TpmVersion {
     V138,
     /// TPM reference implementation version 1.85
     V185,
-}
-
-impl TpmVersion {
-    /// Convert to the corresponding VMGS file ID for the TPM NVRAM file.
-    pub fn to_nvram_vmgs_file_id(self) -> vmgs_format::FileId {
-        match self {
-            TpmVersion::V138 => vmgs_format::FileId::TPM_NVRAM,
-            TpmVersion::V185 => vmgs_format::FileId::TPM_185_NVRAM,
-        }
-    }
 }
 
 /// A resource kind for AK cert renewal helpers.

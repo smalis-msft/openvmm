@@ -130,9 +130,11 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use thiserror::Error;
 use tpm_resources::TpmAkCertTypeResource;
+use tpm_resources::TpmDeviceConfig;
 use tpm_resources::TpmDeviceHandle;
 use tpm_resources::TpmRegisterLayout;
 use tpm_resources::TpmVersion;
+use tpm_vmgs::tpm_nvram_file_id;
 use tracing::Instrument;
 use tracing::instrument;
 use uevent::UeventListener;
@@ -1884,9 +1886,9 @@ async fn new_underhill_vm(
         None => TpmVersion::V138,
     };
     let tpm_version = if let Some((_, ref vmgs)) = vmgs {
-        if vmgs.check_file_allocated(TpmVersion::V185.to_nvram_vmgs_file_id()) {
+        if vmgs.check_file_allocated(tpm_nvram_file_id(TpmVersion::V185)) {
             TpmVersion::V185
-        } else if vmgs.check_file_allocated(TpmVersion::V138.to_nvram_vmgs_file_id()) {
+        } else if vmgs.check_file_allocated(tpm_nvram_file_id(TpmVersion::V138)) {
             TpmVersion::V138
         } else {
             tpm_hint_version
@@ -1895,7 +1897,7 @@ async fn new_underhill_vm(
         tpm_hint_version
     };
 
-    let tpm_nvram_id = tpm_version.to_nvram_vmgs_file_id();
+    let tpm_nvram_id = tpm_nvram_file_id(tpm_version);
     let tpm_size = vmgs
         .as_ref()
         .and_then(|(_, vmgs)| vmgs.get_file_info(tpm_nvram_id).ok())
@@ -3106,9 +3108,11 @@ async fn new_underhill_vm(
             name: "tpm".to_owned(),
             resource: RemoteChipsetDeviceHandle {
                 device: TpmDeviceHandle {
-                    version: tpm_version,
+                    config: TpmDeviceConfig::Fixed {
+                        version: tpm_version,
+                        nvram_store,
+                    },
                     ppi_store,
-                    nvram_store,
                     refresh_tpm_seeds: platform_attestation_data
                         .host_attestation_settings
                         .refresh_tpm_seeds,

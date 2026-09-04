@@ -82,9 +82,11 @@ use storvsp_resources::ScsiControllerHandle;
 use storvsp_resources::ScsiDeviceAndPath;
 use storvsp_resources::ScsiPath;
 use tempfile::TempPath;
+use tpm_resources::TpmDeviceConfig;
 use tpm_resources::TpmDeviceHandle;
 use tpm_resources::TpmRegisterLayout;
 use tpm_resources::TpmVersion;
+use tpm_vmgs::tpm_nvram_file_id;
 use uidevices_resources::SynthVideoHandle;
 use unix_socket::UnixListener;
 use unix_socket::UnixStream;
@@ -1290,7 +1292,7 @@ impl PetriVmConfigSetupCore<'_> {
             } else {
                 (
                     VmgsFileHandle::new(vmgs_format::FileId::TPM_PPI, true).into_resource(),
-                    VmgsFileHandle::new(tpm_version.to_nvram_vmgs_file_id(), true).into_resource(),
+                    VmgsFileHandle::new(tpm_nvram_file_id(tpm_version), true).into_resource(),
                 )
             };
 
@@ -1298,9 +1300,11 @@ impl PetriVmConfigSetupCore<'_> {
                 name: "tpm".to_string(),
                 resource: chipset_device_worker_defs::RemoteChipsetDeviceHandle {
                     device: TpmDeviceHandle {
-                        version: tpm_version,
+                        config: TpmDeviceConfig::Fixed {
+                            version: tpm_version,
+                            nvram_store,
+                        },
                         ppi_store,
-                        nvram_store,
                         refresh_tpm_seeds: false,
                         ak_cert_type: tpm_resources::TpmAkCertTypeResource::None,
                         register_layout,

@@ -48,6 +48,8 @@ vm_resource::register_static_resolvers! {
     // Non-volatile stores
     vmcore::non_volatile_store::resources::EphemeralNonVolatileStoreResolver,
     vmgs_broker::resolver::VmgsFileResolver,
+    #[cfg(feature = "tpm")]
+    tpm_vmgs::VmgsTpmDeviceConfigResolver,
 
     // Serial ports
     serial_core::disconnected::resolver::DisconnectedSerialBackendResolver,

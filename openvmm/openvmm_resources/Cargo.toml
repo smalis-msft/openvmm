@@ -11,7 +11,7 @@ rust-version.workspace = true
 gdb = ["openvmm_core/gdb", "dep:debug_worker"]
 
 # Enable building with TPM device support.
-tpm = ["dep:tpm_device"]
+tpm = ["dep:tpm_device", "dep:tpm_vmgs"]
 
 # Enable building with /dev/mshv support.
 virt_mshv = ["dep:virt_mshv"]
@@ -54,6 +54,7 @@ firmware_uefi.workspace = true
 missing_dev.workspace = true
 guest_watchdog.workspace = true
 tpm_device = { workspace = true, optional = true, features = ["tpm"] }
+tpm_vmgs = { workspace = true, optional = true }
 
 # Non-volatile stores
 vmcore.workspace = true

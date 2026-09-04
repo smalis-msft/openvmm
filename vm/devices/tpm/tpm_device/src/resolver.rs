@@ -9,6 +9,7 @@ use chipset_device_resources::ResolveChipsetDeviceHandleParams;
 use chipset_device_resources::ResolvedChipsetDevice;
 use thiserror::Error;
 use tpm_resources::TpmAkCertTypeResource;
+use tpm_resources::TpmDeviceConfig;
 use tpm_resources::TpmDeviceHandle;
 use vm_resource::AsyncResolveResource;
 use vm_resource::ResolveError;
@@ -25,6 +26,8 @@ declare_static_async_resolver! {
 
 #[derive(Debug, Error)]
 pub enum ResolveTpmError {
+    #[error("error resolving TPM device configuration")]
+    ResolveConfig(#[source] ResolveError),
     #[error("error resolving ppi store")]
     ResolvePpiStore(#[source] ResolveError),
     #[error("error resolving nvram store")]
@@ -55,9 +58,8 @@ impl AsyncResolveResource<ChipsetDeviceHandleKind, TpmDeviceHandle> for TpmDevic
         input: ResolveChipsetDeviceHandleParams<'_>,
     ) -> Result<Self::Output, Self::Error> {
         let TpmDeviceHandle {
-            version,
+            config,
             ppi_store,
-            nvram_store,
             refresh_tpm_seeds,
             ak_cert_type,
             register_layout,
@@ -67,6 +69,20 @@ impl AsyncResolveResource<ChipsetDeviceHandleKind, TpmDeviceHandle> for TpmDevic
             bios_guid,
             nvram_size,
         } = resource;
+
+        let (version, nvram_store) = match config {
+            TpmDeviceConfig::Fixed {
+                version,
+                nvram_store,
+            } => (version, nvram_store),
+            TpmDeviceConfig::Dynamic(config) => {
+                let config = resolver
+                    .resolve(config, &())
+                    .await
+                    .map_err(ResolveTpmError::ResolveConfig)?;
+                (config.version, config.nvram_store)
+            }
+        };
 
         let ppi_store = resolver
             .resolve(ppi_store, &())
