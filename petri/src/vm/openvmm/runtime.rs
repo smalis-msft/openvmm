@@ -36,7 +36,6 @@ use pipette_client::PipetteClient;
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::Weak;
 use std::time::Duration;
 use vmm_core_defs::HaltReason;
 #[cfg(target_os = "linux")]
@@ -171,7 +170,7 @@ impl PetriVmRuntime for PetriVmOpenVmm {
 
     fn inspector(&self) -> Option<OpenVmmInspector> {
         Some(OpenVmmInspector {
-            worker: Arc::downgrade(&self.inner.worker),
+            worker: self.inner.worker.clone(),
         })
     }
 
@@ -822,17 +821,13 @@ impl PetriVmInner {
 
 /// Interface for inspecting OpenVMM
 pub struct OpenVmmInspector {
-    worker: Weak<Worker>,
+    worker: Arc<Worker>,
 }
 
 #[async_trait]
 impl PetriVmInspector for OpenVmmInspector {
     async fn inspect(&self, path: &str) -> anyhow::Result<inspect::Node> {
-        let worker = self
-            .worker
-            .upgrade()
-            .context("OpenVMM worker is no longer available")?;
-        Ok(worker.inspect(path).await)
+        Ok(self.worker.inspect(path).await)
     }
 }
 

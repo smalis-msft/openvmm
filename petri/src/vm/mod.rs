@@ -441,22 +441,13 @@ pub struct PetriVm<T: PetriVmmBackend> {
 struct PetriVmRuntimeGuard<T: PetriVmRuntime> {
     runtime: Option<T>,
     driver: DefaultDriver,
-    inspect: Option<PetriVmInspect<T::VmInspector>>,
-}
-
-struct PetriVmInspect<I> {
-    inspector: Option<I>,
-    openhcl_diag_handler: Option<OpenHclDiagHandler>,
     log_source: PetriLogSource,
+    capture_inspect_on_drop: bool,
 }
 
 impl<T: PetriVmRuntime> PetriVmRuntimeGuard<T> {
     fn take_for_teardown(&mut self) -> T {
         self.runtime.take().expect("runtime has already been taken")
-    }
-
-    fn disarm_inspect(&mut self) {
-        self.inspect = None;
     }
 }
 
@@ -480,32 +471,37 @@ impl<T: PetriVmRuntime> std::ops::DerefMut for PetriVmRuntimeGuard<T> {
 
 impl<T: PetriVmRuntime> Drop for PetriVmRuntimeGuard<T> {
     fn drop(&mut self) {
-        let runtime = self.runtime.take();
-        let Some(inspect) = self.inspect.take() else {
+        let Some(runtime) = self.runtime.take() else {
             return;
         };
-        let PetriVmInspect {
-            inspector,
-            openhcl_diag_handler,
-            log_source,
-        } = inspect;
+        if !self.capture_inspect_on_drop {
+            return;
+        }
+        let inspector = runtime.inspector();
+        let openhcl_diag_handler = runtime.openhcl_diag();
         if inspector.is_none() && openhcl_diag_handler.is_none() {
             return;
         }
+        let log_source = self.log_source.clone();
 
         let capture = async move {
-            if let Some(inspector) = &inspector {
-                collect_inspect("vmm", inspector.inspect(""), &log_source, "failure").await;
-            }
-            if let Some(diag) = &openhcl_diag_handler {
-                collect_inspect(
-                    "openhcl",
-                    diag.inspect("", None, None),
-                    &log_source,
-                    "failure",
-                )
-                .await;
-            }
+            let vmm = async {
+                if let Some(inspector) = &inspector {
+                    collect_inspect("vmm", inspector.inspect(""), &log_source, "failure").await;
+                }
+            };
+            let openhcl = async {
+                if let Some(diag) = &openhcl_diag_handler {
+                    collect_inspect(
+                        "openhcl",
+                        diag.inspect("", None, None),
+                        &log_source,
+                        "failure",
+                    )
+                    .await;
+                }
+            };
+            futures::future::join(vmm, openhcl).await;
             drop(runtime);
         };
 
@@ -1220,11 +1216,6 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             )
             .await?;
         let openhcl_diag_handler = runtime.openhcl_diag();
-        let inspect = self.capture_inspect_on_failure.then(|| PetriVmInspect {
-            inspector: runtime.inspector(),
-            openhcl_diag_handler: runtime.openhcl_diag(),
-            log_source: self.resources.log_source.clone(),
-        });
         let watchdog_tasks =
             Self::start_watchdog_tasks(&self.resources, &mut runtime, self.enable_screenshots)?;
 
@@ -1232,7 +1223,8 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             runtime: PetriVmRuntimeGuard {
                 runtime: Some(runtime),
                 driver: self.resources.driver.clone(),
-                inspect,
+                log_source: self.resources.log_source.clone(),
+                capture_inspect_on_drop: self.capture_inspect_on_failure,
             },
             resources: self.resources,
             watchdog_tasks,
@@ -1905,11 +1897,7 @@ impl<T: PetriVmmBackend> PetriVm<T> {
     /// Immediately tear down the VM.
     pub async fn teardown(mut self) -> anyhow::Result<()> {
         tracing::info!("Tearing down VM...");
-        let result = self.runtime.take_for_teardown().teardown().await;
-        if result.is_ok() {
-            self.runtime.disarm_inspect();
-        }
-        result
+        self.runtime.take_for_teardown().teardown().await
     }
 
     /// Wait for the VM to halt, returning the reason for the halt.
