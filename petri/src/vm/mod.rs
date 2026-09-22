@@ -29,7 +29,6 @@ use pal_async::DefaultDriver;
 use pal_async::task::Spawn;
 use pal_async::task::Task;
 use pal_async::timer::PolledTimer;
-use parking_lot::Mutex;
 use petri_artifacts_common::tags::GuestQuirks;
 use petri_artifacts_common::tags::GuestQuirksInner;
 use petri_artifacts_common::tags::InitialRebootCondition;
@@ -195,12 +194,9 @@ pub struct PetriVmBuilder<T: PetriVmmBackend> {
     no_vmbus: bool,
     // Disable the hypervisor (HV#1) enlightenments. Implies `no_vmbus`.
     no_hv: bool,
-    // Inspect state buffer, captured when the VM is dropped. `None` disables
-    // the capture.
-    inspect_snapshots: Option<InspectBuffer>,
+    // Capture the VM's inspect output on test failure.
+    capture_inspect_on_failure: bool,
 }
-
-type InspectBuffer = Arc<Mutex<BTreeMap<&'static str, inspect::Node>>>;
 
 /// How long to wait on a single inspect before giving up on it.
 const INSPECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -445,13 +441,22 @@ pub struct PetriVm<T: PetriVmmBackend> {
 struct PetriVmRuntimeGuard<T: PetriVmRuntime> {
     runtime: Option<T>,
     driver: DefaultDriver,
-    snapshots: Option<InspectBuffer>,
+    inspect: Option<PetriVmInspect<T::VmInspector>>,
+}
+
+struct PetriVmInspect<I> {
+    inspector: Option<I>,
+    openhcl_diag_handler: Option<OpenHclDiagHandler>,
+    log_source: PetriLogSource,
 }
 
 impl<T: PetriVmRuntime> PetriVmRuntimeGuard<T> {
-    /// Takes the runtime, suppressing the inspect capture on drop.
-    fn take(&mut self) -> T {
+    fn take_for_teardown(&mut self) -> T {
         self.runtime.take().expect("runtime has already been taken")
+    }
+
+    fn disarm_inspect(&mut self) {
+        self.inspect = None;
     }
 }
 
@@ -475,29 +480,29 @@ impl<T: PetriVmRuntime> std::ops::DerefMut for PetriVmRuntimeGuard<T> {
 
 impl<T: PetriVmRuntime> Drop for PetriVmRuntimeGuard<T> {
     fn drop(&mut self) {
-        let (Some(runtime), Some(snapshots)) = (self.runtime.take(), self.snapshots.clone()) else {
+        let runtime = self.runtime.take();
+        let Some(inspect) = self.inspect.take() else {
             return;
         };
-        let inspector = runtime.inspector();
-        let openhcl_diag_handler = runtime.openhcl_diag();
+        let PetriVmInspect {
+            inspector,
+            openhcl_diag_handler,
+            log_source,
+        } = inspect;
         if inspector.is_none() && openhcl_diag_handler.is_none() {
             return;
         }
 
         let capture = async move {
             if let Some(inspector) = &inspector {
-                collect_inspect(
-                    "vmm",
-                    inspector.inspect(""),
-                    InspectSink::Buffer(&snapshots),
-                )
-                .await;
+                collect_inspect("vmm", inspector.inspect(""), &log_source, "failure").await;
             }
             if let Some(diag) = &openhcl_diag_handler {
                 collect_inspect(
                     "openhcl",
                     diag.inspect("", None, None),
-                    InspectSink::Buffer(&snapshots),
+                    &log_source,
+                    "failure",
                 )
                 .await;
             }
@@ -588,11 +593,10 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             vhost_vsock_guest_cid: None,
             no_vmbus: false,
             no_hv: false,
-            inspect_snapshots: Some(InspectBuffer::default()),
+            capture_inspect_on_failure: true,
         }
         .add_petri_scsi_controllers()
-        .add_guest_crash_disk(params.post_test_hooks)
-        .save_inspect_state_on_failure(params.post_test_hooks))
+        .add_guest_crash_disk(params.post_test_hooks))
     }
 
     /// Create a minimal VM builder with only the bare minimum device set.
@@ -672,7 +676,7 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             vhost_vsock_guest_cid: None,
             no_vmbus: false,
             no_hv: false,
-            inspect_snapshots: None,
+            capture_inspect_on_failure: false,
         })
     }
 
@@ -901,31 +905,6 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
         } else {
             self
         }
-    }
-
-    fn save_inspect_state_on_failure(self, post_test_hooks: &mut Vec<PetriPostTestHook>) -> Self {
-        let Some(snapshots) = self.inspect_snapshots.clone() else {
-            return self;
-        };
-        let logger = self.resources.log_source.clone();
-
-        post_test_hooks.push(PetriPostTestHook::new(
-            "save inspect state".into(),
-            move |test_passed| {
-                if test_passed {
-                    return Ok(());
-                }
-                for (name, node) in snapshots.lock().iter() {
-                    logger.write_attachment(
-                        &format!("failure_inspect_{name}.log"),
-                        format!("{node:#}").as_bytes(),
-                    )?;
-                }
-                Ok(())
-            },
-        ));
-
-        self
     }
 
     fn add_agent_disks(self) -> Self {
@@ -1241,6 +1220,11 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             )
             .await?;
         let openhcl_diag_handler = runtime.openhcl_diag();
+        let inspect = self.capture_inspect_on_failure.then(|| PetriVmInspect {
+            inspector: runtime.inspector(),
+            openhcl_diag_handler: runtime.openhcl_diag(),
+            log_source: self.resources.log_source.clone(),
+        });
         let watchdog_tasks =
             Self::start_watchdog_tasks(&self.resources, &mut runtime, self.enable_screenshots)?;
 
@@ -1248,7 +1232,7 @@ impl<T: PetriVmmBackend> PetriVmBuilder<T> {
             runtime: PetriVmRuntimeGuard {
                 runtime: Some(runtime),
                 driver: self.resources.driver.clone(),
-                snapshots: self.inspect_snapshots,
+                inspect,
             },
             resources: self.resources,
             watchdog_tasks,
@@ -1921,7 +1905,11 @@ impl<T: PetriVmmBackend> PetriVm<T> {
     /// Immediately tear down the VM.
     pub async fn teardown(mut self) -> anyhow::Result<()> {
         tracing::info!("Tearing down VM...");
-        self.runtime.take().teardown().await
+        let result = self.runtime.take_for_teardown().teardown().await;
+        if result.is_ok() {
+            self.runtime.disarm_inspect();
+        }
+        result
     }
 
     /// Wait for the VM to halt, returning the reason for the halt.
@@ -2134,7 +2122,8 @@ impl<T: PetriVmmBackend> PetriVm<T> {
                 collect_inspect(
                     "vmm",
                     Box::pin(async move { inspector.inspect("").await }),
-                    InspectSink::Attachment(&self.resources.log_source),
+                    &self.resources.log_source,
+                    "timeout",
                 )
                 .await;
             }
@@ -3633,7 +3622,8 @@ fn append_cmdline(cmd: &mut Option<String>, add_cmd: impl AsRef<str>) {
 async fn collect_inspect(
     name: &'static str,
     inspect: impl Future<Output = anyhow::Result<inspect::Node>>,
-    sink: InspectSink<'_>,
+    log_source: &PetriLogSource,
+    prefix: &str,
 ) {
     let node = match CancelContext::new()
         .with_timeout(INSPECT_TIMEOUT)
@@ -3651,27 +3641,12 @@ async fn collect_inspect(
         }
     };
 
-    match sink {
-        InspectSink::Attachment(log_source) => {
-            if let Err(e) = log_source.write_attachment(
-                &format!("timeout_inspect_{name}.log"),
-                format!("{node:#}").as_bytes(),
-            ) {
-                tracing::error!(name, ?e, "failed to save inspect log");
-            }
-        }
-        InspectSink::Buffer(snapshots) => {
-            snapshots.lock().insert(name, node);
-        }
+    if let Err(e) = log_source.write_attachment(
+        &format!("{prefix}_inspect_{name}.log"),
+        format!("{node:#}").as_bytes(),
+    ) {
+        tracing::error!(name, ?e, "failed to save inspect log");
     }
-}
-
-/// Where [`collect_inspect`] puts the state it collects.
-enum InspectSink<'a> {
-    /// Written out immediately as `timeout_inspect_{name}.log`.
-    Attachment(&'a PetriLogSource),
-    /// Buffered for the post-test hook to write out if the test failed.
-    Buffer(&'a InspectBuffer),
 }
 
 /// Wrapper for modification functions with stubbed out debug impl
