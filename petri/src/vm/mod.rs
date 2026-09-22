@@ -3775,11 +3775,199 @@ pub(crate) fn petri_disk_cache_dir() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::make_vm_safe_name;
+    use super::*;
     use crate::Drive;
     use crate::VmbusStorageController;
     use crate::VmbusStorageType;
     use crate::Vtl;
+
+    #[derive(Clone, Copy)]
+    enum TestInspectBehavior {
+        Success,
+        Error,
+        Panic,
+    }
+
+    #[derive(Clone)]
+    struct TestInspector(TestInspectBehavior);
+
+    #[async_trait::async_trait]
+    impl PetriVmInspector for TestInspector {
+        async fn inspect(&self, _path: &str) -> anyhow::Result<inspect::Node> {
+            match self.0 {
+                TestInspectBehavior::Success => Ok(inspect::Node::Unevaluated),
+                TestInspectBehavior::Error => anyhow::bail!("inspect failed"),
+                TestInspectBehavior::Panic => panic!("inspect panicked"),
+            }
+        }
+    }
+
+    struct TestFramebuffer;
+
+    #[async_trait::async_trait]
+    impl PetriVmFramebufferAccess for TestFramebuffer {
+        async fn screenshot(
+            &mut self,
+            _image: &mut Vec<u8>,
+        ) -> anyhow::Result<Option<VmScreenshotMeta>> {
+            unreachable!()
+        }
+    }
+
+    struct TestRuntime(TestInspectBehavior);
+
+    #[async_trait::async_trait]
+    impl PetriVmRuntime for TestRuntime {
+        type VmInspector = TestInspector;
+        type VmFramebufferAccess = TestFramebuffer;
+
+        async fn teardown(self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn wait_for_halt(
+            &mut self,
+            _allow_reset: bool,
+        ) -> anyhow::Result<PetriHaltReasonDetail> {
+            unreachable!()
+        }
+
+        async fn wait_for_agent(&mut self, _set_high_vtl: bool) -> anyhow::Result<PipetteClient> {
+            unreachable!()
+        }
+
+        fn openhcl_diag(&self) -> Option<OpenHclDiagHandler> {
+            None
+        }
+
+        async fn wait_for_boot_event(
+            &mut self,
+            _timeout: Option<Duration>,
+        ) -> anyhow::Result<Option<FirmwareEvent>> {
+            unreachable!()
+        }
+
+        async fn wait_for_enlightened_shutdown_ready(&mut self) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn send_enlightened_shutdown(&mut self, _kind: ShutdownKind) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn restart_openhcl(
+            &mut self,
+            _new_openhcl: &ResolvedArtifact,
+            _flags: OpenHclServicingFlags,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn save_openhcl(
+            &mut self,
+            _new_openhcl: &ResolvedArtifact,
+            _flags: OpenHclServicingFlags,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn restore_openhcl(&mut self) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn update_command_line(&mut self, _command_line: &str) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        fn inspector(&self) -> Option<Self::VmInspector> {
+            Some(TestInspector(self.0))
+        }
+
+        async fn reset(&mut self) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn set_vtl2_settings(&mut self, _settings: &Vtl2Settings) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn set_vmbus_drive(
+            &mut self,
+            _disk: &Drive,
+            _controller_id: &Guid,
+            _controller_location: u32,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+    }
+
+    fn test_runtime_guard(
+        driver: DefaultDriver,
+        log_source: &PetriLogSource,
+        behavior: TestInspectBehavior,
+    ) -> PetriVmRuntimeGuard<TestRuntime> {
+        PetriVmRuntimeGuard {
+            runtime: Some(TestRuntime(behavior)),
+            driver,
+            log_source: log_source.clone(),
+            capture_inspect_on_drop: true,
+        }
+    }
+
+    fn run_failed_test(
+        log_source: &PetriLogSource,
+        behavior: TestInspectBehavior,
+    ) -> anyhow::Result<()> {
+        let pool = pal_async::DefaultPool::new();
+        let driver = pool.driver();
+        drop(test_runtime_guard(driver.clone(), log_source, behavior));
+        drop(driver);
+        pool.run();
+        anyhow::bail!("original test failure")
+    }
+
+    fn inspect_attachment_count(log_source: &PetriLogSource) -> usize {
+        fs_err::read_dir(log_source.output_dir())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("failure_inspect_vmm")
+            })
+            .count()
+    }
+
+    #[test]
+    fn test_runtime_guard_failure_capture() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log_source = crate::tracing::try_init_tracing(
+            temp_dir.path(),
+            tracing::level_filters::LevelFilter::DEBUG,
+        )
+        .unwrap();
+
+        let error = run_failed_test(&log_source, TestInspectBehavior::Success).unwrap_err();
+        assert_eq!(error.to_string(), "original test failure");
+        assert_eq!(inspect_attachment_count(&log_source), 1);
+
+        let pool = pal_async::DefaultPool::new();
+        let driver = pool.driver();
+        let mut guard =
+            test_runtime_guard(driver.clone(), &log_source, TestInspectBehavior::Success);
+        let _runtime = guard.take_for_teardown();
+        drop(guard);
+        drop(driver);
+        pool.run();
+        assert_eq!(inspect_attachment_count(&log_source), 1);
+
+        for behavior in [TestInspectBehavior::Error, TestInspectBehavior::Panic] {
+            let error = run_failed_test(&log_source, behavior).unwrap_err();
+            assert_eq!(error.to_string(), "original test failure");
+            assert_eq!(inspect_attachment_count(&log_source), 1);
+        }
+    }
 
     #[test]
     fn test_short_names_unchanged() {
