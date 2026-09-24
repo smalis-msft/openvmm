@@ -20,6 +20,7 @@ pub const AZCOPY: &str = "10.27.1";
 pub const AZURE_CLI: &str = "2.56.0";
 pub const DOTNET: &str = "8.0";
 pub const FUZZ: &str = "0.12.0";
+pub const HACK: &str = "0.6.45";
 pub const GH_CLI: &str = "2.52.0";
 pub const MDBOOK: &str = "0.4.40";
 pub const MDBOOK_ADMONISH: &str = "1.18.0";
@@ -68,6 +69,7 @@ impl FlowNode for Node {
         ctx.import::<crate::cfg_rustup_version::Node>();
         ctx.import::<flowey_lib_common::download_azcopy::Node>();
         ctx.import::<flowey_lib_common::download_cargo_fuzz::Node>();
+        ctx.import::<flowey_lib_common::download_cargo_hack::Node>();
         ctx.import::<flowey_lib_common::download_cargo_nextest::Node>();
         ctx.import::<flowey_lib_common::download_gh_cli::Node>();
         ctx.import::<flowey_lib_common::download_mdbook_admonish::Node>();
@@ -238,6 +240,9 @@ impl FlowNode for Node {
         });
         ctx.config(flowey_lib_common::download_cargo_fuzz::Config {
             version: Some(FUZZ.into()),
+        });
+        ctx.config(flowey_lib_common::download_cargo_hack::Config {
+            version: Some(HACK.into()),
         });
         ctx.config(flowey_lib_common::download_cargo_nextest::Config {
             version: Some(NEXTEST.into()),

@@ -22,6 +22,7 @@ pub mod check_needs_relaunch;
 pub mod copy_to_artifact_dir;
 pub mod download_azcopy;
 pub mod download_cargo_fuzz;
+pub mod download_cargo_hack;
 pub mod download_cargo_nextest;
 pub mod download_gh_artifact;
 pub mod download_gh_cli;
