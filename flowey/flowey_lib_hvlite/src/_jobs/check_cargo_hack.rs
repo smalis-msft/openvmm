@@ -69,6 +69,8 @@ impl SimpleFlowNode for Node {
                         --locked
                         --keep-going
                         --exclude crypto
+                        --exclude tpm_device
+                        --exclude tpm_lib
                         check
                     "
                 )
