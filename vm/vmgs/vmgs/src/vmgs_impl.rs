@@ -462,6 +462,20 @@ impl Vmgs {
         Self::open_inner(storage, logger).await
     }
 
+    /// Opens a VMGS file without modifying its headers or provisioning markers.
+    pub async fn open_read_only(
+        disk: Disk,
+        logger: Option<Arc<dyn VmgsLogger>>,
+    ) -> Result<Self, Error> {
+        if !disk.is_read_only() {
+            return Err(Error::ReadOnlyRequired);
+        }
+        tracing::debug!(CVM_ALLOWED, "opening VMGS datastore read-only");
+        let mut storage = VmgsStorage::new_validated(disk).map_err(Error::Initialization)?;
+        let (active_header, active_header_index) = Self::open_header(&mut storage).await?;
+        Self::finish_open(storage, active_header, active_header_index, logger).await
+    }
+
     /// Format and open a new VMGS file.
     pub async fn format_new(
         disk: Disk,
@@ -1274,6 +1288,11 @@ impl Vmgs {
     /// Why this VMGS file was provisioned
     pub fn provisioning_reason(&self) -> Option<VmgsProvisioningReason> {
         self.state.provisioning_reason
+    }
+
+    /// Returns whether this VMGS is marked as already reprovisioned.
+    pub fn is_reprovisioned(&self) -> bool {
+        self.state.reprovisioned
     }
 
     /// Write a provisioning marker to this VMGS file
@@ -2138,6 +2157,20 @@ mod tests {
 
         let result = Vmgs::open(disk, None).await;
         assert!(matches!(result, Err(Error::EmptyFile)));
+    }
+
+    #[async_test]
+    async fn open_read_only_requires_read_only_disk() {
+        assert!(matches!(
+            Vmgs::open_read_only(new_test_file(), None).await,
+            Err(Error::ReadOnlyRequired)
+        ));
+
+        let disk = disklayer_ram::ram_disk(4 * ONE_MEGA_BYTE, true).unwrap();
+        assert!(matches!(
+            Vmgs::open_read_only(disk, None).await,
+            Err(Error::EmptyFile)
+        ));
     }
 
     #[async_test]

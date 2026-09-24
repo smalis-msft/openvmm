@@ -75,6 +75,9 @@ pub enum Error {
     /// VMGS is v1 format
     #[error("VMGS is v1 format")]
     V1Format,
+    /// Read-only VMGS inspection requires a read-only disk.
+    #[error("read-only VMGS inspection requires a read-only disk")]
+    ReadOnlyRequired,
     /// Cannot overwrite file when moving
     #[error("Cannot overwrite file when moving")]
     OverwriteMove,

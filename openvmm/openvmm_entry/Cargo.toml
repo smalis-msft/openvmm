@@ -13,12 +13,11 @@ grpc = ["mesh_rpc/grpc"]
 ttrpc = []
 
 [dependencies]
-chipset_resources.workspace = true
 chipset_device_worker_defs.workspace = true
+chipset_resources.workspace = true
 crypto.workspace = true
 cxl_spec.workspace = true
 debug_worker_defs.workspace = true
-vmotherboard.workspace = true
 diag_client.workspace = true
 memory_range.workspace = true
 openvmm_build_info.workspace = true
@@ -28,6 +27,7 @@ vmm_core_defs.workspace = true
 vnc_worker_defs.workspace = true
 openvmm_pcat_locator.workspace = true
 openvmm_ttrpc_vmservice.workspace = true
+disk_backend.workspace = true
 disk_backend_resources.workspace = true
 disk_crypt_resources.workspace = true
 firmware_uefi_resources.workspace = true
@@ -60,6 +60,7 @@ vmgs_format.workspace = true
 vmgs_resources.workspace = true
 vm_manifest_builder.workspace = true
 vm_resource.workspace = true
+vmotherboard.workspace = true
 vtl2_settings_proto.workspace = true
 pcie_remote_resources.workspace = true
 

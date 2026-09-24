@@ -41,6 +41,7 @@ use cli_args::VirtioBusCli;
 use cli_args::VmgsCli;
 use crash_dump::spawn_dump_handler;
 use cxl_spec::test::CxlTestDeviceHandle;
+use disk_backend::resolve::ResolveDiskParameters;
 use disk_backend_resources::DelayDiskHandle;
 use disk_backend_resources::DiskLayerDescription;
 use disk_backend_resources::layer::DiskLayerHandle;
@@ -132,6 +133,7 @@ use vm_manifest_builder::VmChipsetResult;
 use vm_manifest_builder::VmManifestBuilder;
 use vm_resource::IntoResource;
 use vm_resource::Resource;
+use vm_resource::ResourceResolver;
 use vm_resource::kind::DiskHandleKind;
 use vm_resource::kind::DiskLayerHandleKind;
 use vm_resource::kind::NetEndpointHandleKind;
@@ -140,6 +142,8 @@ use vm_resource::kind::VmbusDeviceHandleKind;
 use vmbus_serial_resources::VmbusSerialDeviceHandle;
 use vmbus_serial_resources::VmbusSerialPort;
 use vmcore::non_volatile_store::resources::EphemeralNonVolatileStoreHandle;
+use vmcore::vm_task::VmTaskDriverSource;
+use vmcore::vm_task::thread::ThreadDriverBackend;
 use vmgs_resources::GuestStateEncryptionPolicy;
 use vmgs_resources::VmgsDisk;
 use vmgs_resources::VmgsFileHandle;
@@ -314,7 +318,7 @@ fn smbios_config_from_cli(
 }
 
 async fn vm_config_from_command_line(
-    spawner: impl Spawn,
+    driver: &DefaultDriver,
     mesh: &VmmMesh,
     opt: &Options,
 ) -> anyhow::Result<(Config, VmResources)> {
@@ -1329,10 +1333,24 @@ async fn vm_config_from_command_line(
         .build()
         .context("failed to build chipset configuration")?;
 
-    let tpm_version = opt.tpm.map(|cli_ver| match cli_ver {
-        TpmVersionCli::V138 => TpmVersion::V138,
-        TpmVersionCli::V185 => TpmVersion::V185,
+    let tpm = opt.tpm.map(|cli_ver| {
+        cli_ver.map(|version| match version {
+            TpmVersionCli::V138 => TpmVersion::V138,
+            TpmVersionCli::V185 => TpmVersion::V185,
+        })
     });
+    let tpm_version = if !opt.vtl2 {
+        match tpm {
+            Some(specified_version) => Some(
+                resolve_tpm_version(driver, opt.vmgs.as_ref(), specified_version)
+                    .await
+                    .context("failed to resolve TPM version")?,
+            ),
+            None => None,
+        }
+    } else {
+        tpm.flatten()
+    };
 
     if opt.restore_snapshot.is_some() {
         // Snapshot restore: skip firmware loading entirely. Device state and
@@ -1613,9 +1631,10 @@ async fn vm_config_from_command_line(
                         .vtl2_gfx
                         .then(|| SharedFramebufferHandle.into_resource()),
                     guest_request_recv,
-                    tpm_version: tpm_version.map(|v| match v {
-                        TpmVersion::V138 => get_resources::ged::GedTpmVersion::V138,
-                        TpmVersion::V185 => get_resources::ged::GedTpmVersion::V185,
+                    tpm_version: tpm.map(|version| match version {
+                        None => get_resources::ged::GedTpmVersion::Unspecified,
+                        Some(TpmVersion::V138) => get_resources::ged::GedTpmVersion::V138,
+                        Some(TpmVersion::V185) => get_resources::ged::GedTpmVersion::V185,
                     }),
                     firmware_event_send: None,
                     ipmi_sel_event_send: None,
@@ -1652,8 +1671,8 @@ async fn vm_config_from_command_line(
         ]);
     }
 
-    if let Some(tpm_version) = tpm_version
-        && !opt.vtl2
+    if !opt.vtl2
+        && let Some(tpm_version) = tpm_version
     {
         let register_layout = if cfg!(guest_arch = "x86_64") {
             TpmRegisterLayout::IoPort
@@ -1758,7 +1777,7 @@ async fn vm_config_from_command_line(
     let vtl2_vsock_listener = vsock_listener(opt.vmbus_vtl2_vsock_path.as_deref())?;
 
     if let Some(path) = &opt.openhcl_dump_path {
-        let (resource, task) = spawn_dump_handler(&spawner, path.clone(), None);
+        let (resource, task) = spawn_dump_handler(driver, path.clone(), None);
         task.detach();
         vmbus_devices.push((openhcl_vtl, resource));
     }
@@ -2438,6 +2457,42 @@ enum LayerOrDisk {
     Disk(Resource<DiskHandleKind>),
 }
 
+async fn resolve_tpm_version(
+    driver: &DefaultDriver,
+    vmgs: Option<&VmgsCli>,
+    specified_version: Option<TpmVersion>,
+) -> anyhow::Result<TpmVersion> {
+    let probe = if let Some(vmgs) = vmgs {
+        let probe_resource = disk_open(&vmgs.kind, true)
+            .await
+            .context("failed to open VMGS probe disk")?;
+        let driver_source = VmTaskDriverSource::new(ThreadDriverBackend::new(driver.clone()));
+        let probe_disk = ResourceResolver::new()
+            .resolve(
+                probe_resource,
+                ResolveDiskParameters {
+                    read_only: true,
+                    driver_source: &driver_source,
+                },
+            )
+            .await
+            .context("failed to resolve VMGS probe disk")?
+            .0;
+        let open_mode = match vmgs.provision {
+            ProvisionVmgs::OnEmpty => tpm_vmgs::VmgsOpenMode::OnEmpty,
+            ProvisionVmgs::OnFailure => tpm_vmgs::VmgsOpenMode::OnFailure,
+            ProvisionVmgs::True => tpm_vmgs::VmgsOpenMode::Reprovision,
+        };
+        Some((probe_disk, open_mode))
+    } else {
+        None
+    };
+
+    tpm_vmgs::resolve_tpm_version(probe, specified_version)
+        .await
+        .context("failed to probe VMGS TPM state")
+}
+
 async fn disk_open(
     disk_cli: &DiskCliKind,
     read_only: bool,
@@ -2489,27 +2544,35 @@ fn disk_open_inner<'a>(
                 path,
                 create_with_len,
                 direct,
-            } => layers.push(LayerOrDisk::Disk(if let Some(size) = create_with_len {
-                create_disk_type(
-                    path,
-                    *size,
-                    OpenDiskOptions {
-                        read_only: false,
-                        direct: *direct,
-                    },
-                )
-                .with_context(|| format!("failed to create {}", path.display()))?
-            } else {
-                open_disk_type(
-                    path,
-                    OpenDiskOptions {
-                        read_only,
-                        direct: *direct,
-                    },
-                )
-                .await
-                .with_context(|| format!("failed to open {}", path.display()))?
-            })),
+            } => {
+                if let Some(size) = create_with_len
+                    && read_only
+                {
+                    disk_open_inner(&DiskCliKind::Memory(*size), true, layers).await?;
+                } else {
+                    layers.push(LayerOrDisk::Disk(if let Some(size) = create_with_len {
+                        create_disk_type(
+                            path,
+                            *size,
+                            OpenDiskOptions {
+                                read_only: false,
+                                direct: *direct,
+                            },
+                        )
+                        .with_context(|| format!("failed to create {}", path.display()))?
+                    } else {
+                        open_disk_type(
+                            path,
+                            OpenDiskOptions {
+                                read_only,
+                                direct: *direct,
+                            },
+                        )
+                        .await
+                        .with_context(|| format!("failed to open {}", path.display()))?
+                    }));
+                }
+            }
             DiskCliKind::Blob { kind, url } => {
                 layers.push(disk(disk_backend_resources::BlobDiskHandle {
                     url: url.to_owned(),
@@ -2555,6 +2618,12 @@ fn disk_open_inner<'a>(
                 path,
                 create_with_len,
             } => {
+                if let Some(len) = create_with_len
+                    && read_only
+                {
+                    disk_open_inner(&DiskCliKind::Memory(*len), true, layers).await?;
+                    return Ok(());
+                }
                 // FUTURE: this code should be responsible for opening
                 // file-handle(s) itself, and passing them into sqlite via a custom
                 // vfs. For now though - simply check if the file exists or not, and
@@ -2582,6 +2651,10 @@ fn disk_open_inner<'a>(
                 }));
             }
             DiskCliKind::SqliteDiff { path, create, disk } => {
+                if *create && read_only {
+                    disk_open_inner(&DiskCliKind::MemoryDiff(disk.clone()), true, layers).await?;
+                    return Ok(());
+                }
                 // FUTURE: this code should be responsible for opening
                 // file-handle(s) itself, and passing them into sqlite via a custom
                 // vfs. For now though - simply check if the file exists or not, and
@@ -2614,15 +2687,19 @@ fn disk_open_inner<'a>(
                 key,
                 disk,
             } => {
-                layers.push(LayerOrDisk::Layer(DiskLayerDescription {
-                    read_cache: true,
-                    write_through: false,
-                    layer: SqliteAutoCacheDiskLayerHandle {
-                        cache_path: cache_path.clone(),
-                        cache_key: key.clone(),
-                    }
-                    .into_resource(),
-                }));
+                if !read_only {
+                    layers.push(LayerOrDisk::Layer(DiskLayerDescription {
+                        read_cache: true,
+                        write_through: false,
+                        layer: SqliteAutoCacheDiskLayerHandle {
+                            cache_path: cache_path.clone(),
+                            cache_key: key.clone(),
+                        }
+                        .into_resource(),
+                    }));
+                }
+                // This is a redundant read cache and may not exist yet. Skip
+                // it for read-only inspection instead of creating cache state.
                 disk_open_inner(disk, read_only, layers).await?;
             }
         }
@@ -3155,6 +3232,31 @@ mod tests {
     use super::*;
     use clap::Parser;
     use test_with_tracing::test;
+
+    #[test]
+    fn vmgs_probe_does_not_create_backing() {
+        let dir = tempfile::tempdir().unwrap();
+        for (disk, path) in [
+            (
+                DiskCliKind::File {
+                    path: dir.path().join("new.vmgs"),
+                    create_with_len: Some(4 * 1024 * 1024),
+                    direct: false,
+                },
+                dir.path().join("new.vmgs"),
+            ),
+            (
+                DiskCliKind::Sqlite {
+                    path: dir.path().join("new.dbhd"),
+                    create_with_len: Some(4 * 1024 * 1024),
+                },
+                dir.path().join("new.dbhd"),
+            ),
+        ] {
+            block_on(disk_open(&disk, true)).unwrap();
+            assert!(!path.exists());
+        }
+    }
 
     #[test]
     fn maps_igvm_personalities_to_chipsets() {

@@ -163,8 +163,10 @@ describes the source definitions.
   With `--igvm --vtl2`, omit `--igvm-personality`. OpenVMM retains the
   existing HCL-host device shape and VBS-compatible IGVM behavior.
 * `--tpm [VERSION]`: Add a vTPM device. Supported versions are `138` and
-  `185`; a bare `--tpm` uses version `185`. The dotted forms `1.38` and `1.85`
-  are also accepted.
+  `185`. A bare `--tpm` uses an existing 1.85 or 1.38 VMGS file, in that
+  order, and falls back to version 1.85. An explicit version is always used;
+  OpenVMM warns if only the other version's VMGS file exists. The dotted forms
+  `1.38` and `1.85` are also accepted.
 * `--vmbus-scsi id=<name>[,sub_channels=<N>][,vtl2]`: Creates a
   named VMBus SCSI controller. Use with `--disk ...,on=<name>` to
   attach disks.

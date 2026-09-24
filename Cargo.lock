@@ -5953,6 +5953,7 @@ dependencies = [
  "debug_worker_defs",
  "diag_client",
  "dirs",
+ "disk_backend",
  "disk_backend_resources",
  "disk_crypt_resources",
  "firmware_uefi_resources",
@@ -8746,7 +8747,11 @@ dependencies = [
 name = "tpm_vmgs"
 version = "0.0.0"
 dependencies = [
+ "disk_backend",
+ "test_with_tracing",
  "tpm_resources",
+ "tracing",
+ "vmgs",
  "vmgs_format",
 ]
 

@@ -133,6 +133,8 @@ use tpm_resources::TpmAkCertTypeResource;
 use tpm_resources::TpmDeviceHandle;
 use tpm_resources::TpmRegisterLayout;
 use tpm_resources::TpmVersion;
+use tpm_vmgs::TpmVersionSelection;
+use tpm_vmgs::select_tpm_version;
 use tpm_vmgs::tpm_nvram_file_id;
 use tracing::Instrument;
 use tracing::instrument;
@@ -1888,17 +1890,11 @@ async fn new_underhill_vm(
         (false, false) => TpmVersion::V138,
         (true, true) => TpmVersion::V185,
     };
-    let tpm_version = if let Some((_, ref vmgs)) = vmgs {
-        if vmgs.check_file_allocated(tpm_nvram_file_id(TpmVersion::V185)) {
-            TpmVersion::V185
-        } else if vmgs.check_file_allocated(tpm_nvram_file_id(TpmVersion::V138)) {
-            TpmVersion::V138
-        } else {
-            tpm_hint_version
-        }
-    } else {
-        tpm_hint_version
-    };
+    let tpm_version = select_tpm_version(TpmVersionSelection::Hint(tpm_hint_version), |file_id| {
+        vmgs.as_ref()
+            .is_some_and(|(_, vmgs)| vmgs.check_file_allocated(file_id))
+    })
+    .version;
 
     let tpm_nvram_id = tpm_nvram_file_id(tpm_version);
     let tpm_size = vmgs

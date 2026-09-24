@@ -1193,7 +1193,7 @@ impl PetriVmConfigSetupCore<'_> {
             vmgs: memdiff_vmgs(self.vmgs).await?,
             framebuffer: framebuffer.then(|| SharedFramebufferHandle.into_resource()),
             guest_request_recv,
-            tpm_version: self.tpm_config.map(|c| c.version.into() ),
+            tpm_version: self.tpm_config.map(|c| c.version.into()),
             firmware_event_send: Some(firmware_event_send.clone()),
             ipmi_sel_event_send: Some(ipmi_sel_event_send.clone()),
             secure_boot_enabled: *secure_boot_enabled,

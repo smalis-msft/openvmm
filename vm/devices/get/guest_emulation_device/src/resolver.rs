@@ -31,6 +31,14 @@ use vmgs_resources::VmgsResource;
 
 pub struct GuestEmulationDeviceResolver;
 
+fn resolve_tpm_config(tpm: Option<GedTpmVersion>) -> (bool, bool, bool) {
+    (
+        tpm.is_some(),
+        tpm == Some(GedTpmVersion::V138),
+        tpm == Some(GedTpmVersion::V185),
+    )
+}
+
 declare_static_async_resolver! {
     GuestEmulationDeviceResolver,
     (VmbusDeviceHandleKind, GuestEmulationDeviceHandle),
@@ -99,12 +107,14 @@ impl AsyncResolveResource<VmbusDeviceHandleKind, GuestEmulationDeviceHandle>
             ),
         };
 
+        let (enable_tpm, use_tpm_138_by_default, use_tpm_185_by_default) =
+            resolve_tpm_config(resource.tpm_version);
         let management_vtl_features = get_protocol::dps_json::ManagementVtlFeatures::new()
             .with_strict_encryption_policy(guest_state_encryption_policy.is_strict())
             .with_load_firmware_supported(true)
             .with_tx_only_serial_port(resource.serial_tx_only)
-            .with_use_tpm_138_by_default(resource.tpm_version == Some(GedTpmVersion::V138))
-            .with_use_tpm_185_by_default(resource.tpm_version == Some(GedTpmVersion::V185));
+            .with_use_tpm_138_by_default(use_tpm_138_by_default)
+            .with_use_tpm_185_by_default(use_tpm_185_by_default);
 
         let guest_state_encryption_policy = match guest_state_encryption_policy {
             GuestStateEncryptionPolicy::Auto => {
@@ -183,7 +193,7 @@ impl AsyncResolveResource<VmbusDeviceHandleKind, GuestEmulationDeviceHandle>
                 com2: resource.com2,
                 serial_tx_only: resource.serial_tx_only,
                 vmbus_redirection: resource.vmbus_redirection,
-                enable_tpm: resource.tpm_version.is_some(),
+                enable_tpm,
                 vtl2_settings: resource.vtl2_settings,
                 secure_boot_enabled: resource.secure_boot_enabled,
                 secure_boot_template: match resource.secure_boot_template {

@@ -7,8 +7,15 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+disk_backend.workspace = true
 tpm_resources.workspace = true
+vmgs.workspace = true
 vmgs_format.workspace = true
+
+tracing.workspace = true
+
+[dev-dependencies]
+test_with_tracing.workspace = true
 
 [lints]
 workspace = true
