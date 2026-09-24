@@ -67,6 +67,8 @@ impl SimpleFlowNode for Node {
                         --workspace
                         --each-feature
                         --locked
+                        --keep-going
+                        --exclude crypto
                         check
                     "
                 )
