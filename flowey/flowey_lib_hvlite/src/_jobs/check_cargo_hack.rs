@@ -66,11 +66,12 @@ impl SimpleFlowNode for Node {
                     CommonProfile::Release => "release",
                     CommonProfile::Debug => "dev",
                 };
-                // These crates have mutually exclusive backend features and are
-                // covered by targeted jobs elsewhere.
+                let workspace_rust_toolchain = rust_toolchain.clone();
+                // The crypto and TPM implementation crates have mutually exclusive
+                // backend features and are covered by targeted jobs elsewhere.
                 flowey::shell_cmd!(
                     rt,
-                    "cargo {rust_toolchain...}
+                    "cargo {workspace_rust_toolchain...}
                         hack
                         --workspace
                         --each-feature
@@ -79,7 +80,26 @@ impl SimpleFlowNode for Node {
                         --exclude crypto
                         --exclude tpm_device
                         --exclude tpm_lib
-                        --exclude-features openvmm_hcl_resources/tpm,openvmm_resources/tpm
+                        --exclude openvmm_hcl_resources
+                        --exclude openvmm_resources
+                        check
+                        --profile {profile}
+                    "
+                )
+                .run()?;
+
+                // Check the resource crates separately so that only their TPM
+                // features are excluded.
+                flowey::shell_cmd!(
+                    rt,
+                    "cargo {rust_toolchain...}
+                        hack
+                        --package openvmm_hcl_resources
+                        --package openvmm_resources
+                        --each-feature
+                        --locked
+                        --keep-going
+                        --exclude-features tpm
                         check
                         --profile {profile}
                     "
