@@ -5836,7 +5836,7 @@ jobs:
     displayName: symlink protoc
   - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::install_rust 0
     displayName: install Rust
-  - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::download_cargo_hack 0
+  - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::install_cargo_hack 0
     displayName: create cargo-hack cache dir
   - bash: |-
       set -e
@@ -5862,7 +5862,7 @@ jobs:
     displayName: detect active toolchain
   - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::install_rust 2
     displayName: report $CARGO_HOME
-  - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::download_cargo_hack 1
+  - bash: $(FLOWEY_BIN) e 2 flowey_lib_common::install_cargo_hack 1
     displayName: installing cargo-hack
   - bash: $(FLOWEY_BIN) e 2 flowey_lib_hvlite::_jobs::check_cargo_hack 0
     displayName: run cargo hack

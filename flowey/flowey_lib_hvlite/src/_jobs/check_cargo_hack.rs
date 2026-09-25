@@ -19,7 +19,7 @@ impl SimpleFlowNode for Node {
     fn imports(ctx: &mut ImportCtx<'_>) {
         ctx.import::<crate::git_checkout_openvmm_repo::Node>();
         ctx.import::<crate::install_openvmm_rust_build_essential::Node>();
-        ctx.import::<flowey_lib_common::download_cargo_hack::Node>();
+        ctx.import::<flowey_lib_common::install_cargo_hack::Node>();
         ctx.import::<flowey_lib_common::install_dist_pkg::Node>();
         ctx.import::<flowey_lib_common::install_rust::Node>();
     }
@@ -27,21 +27,21 @@ impl SimpleFlowNode for Node {
     fn process_request(request: Self::Request, ctx: &mut NodeCtx<'_>) -> anyhow::Result<()> {
         let Request { done } = request;
 
-        let mut deps = vec![
+        let mut pre_build_deps = vec![
             ctx.reqv(crate::install_openvmm_rust_build_essential::Request),
-            ctx.reqv(flowey_lib_common::download_cargo_hack::Request::InstallWithCargo),
+            ctx.reqv(flowey_lib_common::install_cargo_hack::Request),
         ];
 
         if matches!(
             ctx.platform(),
             FlowPlatform::Linux(FlowPlatformLinuxDistro::Ubuntu)
         ) {
-            deps.push(ctx.reqv(
-                |done| flowey_lib_common::install_dist_pkg::Request::Install {
+            pre_build_deps.push(ctx.reqv(|done| {
+                flowey_lib_common::install_dist_pkg::Request::Install {
                     package_names: vec!["libssl-dev".into(), "pkg-config".into()],
                     done,
-                },
-            ));
+                }
+            }));
         }
 
         let openvmm_repo_path = ctx.reqv(crate::git_checkout_openvmm_repo::req::GetRepoDir);
@@ -49,7 +49,7 @@ impl SimpleFlowNode for Node {
 
         ctx.emit_rust_step("run cargo hack", |ctx| {
             done.claim(ctx);
-            deps.claim(ctx);
+            pre_build_deps.claim(ctx);
             let openvmm_repo_path = openvmm_repo_path.claim(ctx);
             let rust_toolchain = rust_toolchain.claim(ctx);
             move |rt| {
@@ -60,8 +60,8 @@ impl SimpleFlowNode for Node {
                     .read(rust_toolchain)
                     .as_ref()
                     .map(|toolchain| format!("+{toolchain}"));
-                // crypto and the TPMs have to deal with mutually exclusive backend features
-                // Exclude them from this run, they have coverage elsewhere.
+                // These crates have mutually exclusive backend features and are
+                // covered by targeted jobs elsewhere.
                 flowey::shell_cmd!(
                     rt,
                     "cargo {rust_toolchain...}
@@ -70,7 +70,9 @@ impl SimpleFlowNode for Node {
                         --each-feature
                         --locked
                         --keep-going
-                        --exclude crypto,tpm_device,tpm_lib
+                        --exclude crypto
+                        --exclude tpm_device
+                        --exclude tpm_lib
                         --exclude-features openvmm_hcl_resources/tpm,openvmm_resources/tpm
                         check
                     "

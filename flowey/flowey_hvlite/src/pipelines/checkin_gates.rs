@@ -310,7 +310,7 @@ impl IntoPipeline for CheckinGatesCli {
             all_jobs.push(windows_fmt_job);
         }
 
-        let linux_hack_job = pipeline
+        let linux_cargo_hack_job = pipeline
             .new_job(
                 FlowPlatform::Linux(FlowPlatformLinuxDistro::Ubuntu),
                 FlowArch::X86_64,
@@ -320,7 +320,7 @@ impl IntoPipeline for CheckinGatesCli {
             .ado_set_pool(ado_pools::default_linux())
             .side_effect(|done| flowey_lib_hvlite::_jobs::check_cargo_hack::Request { done })
             .finish();
-        all_jobs.push(linux_hack_job);
+        all_jobs.push(linux_cargo_hack_job);
 
         // emit shared dependencies jobs
         //

@@ -3787,7 +3787,7 @@ jobs:
       run: flowey e 2 flowey_lib_common::install_rust 1
       shell: bash
     - name: create cargo-hack cache dir
-      run: flowey e 2 flowey_lib_common::download_cargo_hack 0
+      run: flowey e 2 flowey_lib_common::install_cargo_hack 0
       shell: bash
     - name: Pre-processing cache vars
       run: |-
@@ -3814,7 +3814,7 @@ jobs:
       run: flowey e 2 flowey_lib_common::install_rust 3
       shell: bash
     - name: installing cargo-hack
-      run: flowey e 2 flowey_lib_common::download_cargo_hack 1
+      run: flowey e 2 flowey_lib_common::install_cargo_hack 1
       shell: bash
     - name: run cargo hack
       run: flowey e 2 flowey_lib_hvlite::_jobs::check_cargo_hack 0

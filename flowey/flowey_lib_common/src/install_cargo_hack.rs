@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Download (and install) a copy of `cargo-hack`.
+//! Install a cached copy of `cargo-hack`.
 
 use crate::cache::CacheHit;
 use flowey::node::prelude::*;
 
 flowey_config! {
-    /// Config for the download_cargo_hack node.
+    /// Config for the install_cargo_hack node.
     pub struct Config {
         /// Version of `cargo hack` to install (e.g: "0.6.45")
         pub version: Option<String>,
@@ -15,10 +15,8 @@ flowey_config! {
 }
 
 flowey_request! {
-    pub enum Request {
-        /// Install `cargo-hack` as a `cargo` extension (invoked via `cargo hack`).
-        InstallWithCargo(WriteVar<SideEffect>),
-    }
+    /// Install `cargo-hack` as a Cargo subcommand.
+    pub struct Request(pub WriteVar<SideEffect>);
 }
 
 new_flow_node_with_config!(struct Node);
@@ -38,19 +36,15 @@ impl FlowNodeWithConfig for Node {
         requests: Vec<Self::Request>,
         ctx: &mut NodeCtx<'_>,
     ) -> anyhow::Result<()> {
-        let mut install_with_cargo = Vec::new();
-
-        for req in requests {
-            match req {
-                Request::InstallWithCargo(v) => install_with_cargo.push(v),
-            }
-        }
-
         let version = config
             .version
             .ok_or(anyhow::anyhow!("missing config: version"))?;
+        let done = requests
+            .into_iter()
+            .map(|request| request.0)
+            .collect::<Vec<_>>();
 
-        if install_with_cargo.is_empty() {
+        if done.is_empty() {
             return Ok(());
         }
 
@@ -60,12 +54,16 @@ impl FlowNodeWithConfig for Node {
             |_| Ok(std::env::current_dir()?.absolute()?)
         });
 
-        let cache_key = ReadVar::from_static(format!("cargo-hack-{version}"));
+        let cache_key = ReadVar::from_static(format!(
+            "cargo-hack-{version}-{}-{}",
+            ctx.arch(),
+            ctx.platform()
+        ));
         let hitvar = ctx.reqv(|v| crate::cache::Request {
             label: "cargo-hack".into(),
             dir: cache_dir.clone(),
             key: cache_key,
-            restore_keys: None,
+            restore_keys: None, // we want an exact hit
             hitvar: v,
         });
 
@@ -75,7 +73,7 @@ impl FlowNodeWithConfig for Node {
         let cargo_home = ctx.reqv(crate::install_rust::Request::GetCargoHome);
 
         ctx.emit_rust_step("installing cargo-hack", |ctx| {
-            install_with_cargo.claim(ctx);
+            done.claim(ctx);
 
             let cache_dir = cache_dir.claim(ctx);
             let hitvar = hitvar.claim(ctx);
@@ -118,15 +116,21 @@ impl FlowNodeWithConfig for Node {
                         .run()
                     };
 
+                    // Try --offline to avoid an unnecessary git fetch on rerun.
                     if run(Some("--offline")).is_err() {
+                        // Try again without --offline.
                         run(None)?;
                     }
 
                     let out_bin = root.absolute()?.join("bin").join(&cargo_hack_bin);
+
+                    // Move the compiled binary into the cache directory.
                     fs_err::rename(out_bin, &cached_bin_path)?;
                     cached_bin_path.absolute()?
                 };
 
+                // Copy the binary into Cargo's bin directory so it is available
+                // as `cargo hack`.
                 fs_err::copy(
                     &path_to_cargo_hack,
                     rt.read(cargo_home).join("bin").join(&cargo_hack_bin),
