@@ -3,10 +3,12 @@
 
 //! Check every OpenVMM workspace feature with `cargo-hack`.
 
+use crate::common::CommonProfile;
 use flowey::node::prelude::*;
 
 flowey_request! {
     pub struct Request {
+        pub profile: CommonProfile,
         pub done: WriteVar<SideEffect>,
     }
 }
@@ -25,7 +27,7 @@ impl SimpleFlowNode for Node {
     }
 
     fn process_request(request: Self::Request, ctx: &mut NodeCtx<'_>) -> anyhow::Result<()> {
-        let Request { done } = request;
+        let Request { profile, done } = request;
 
         let mut pre_build_deps = vec![
             ctx.reqv(crate::install_openvmm_rust_build_essential::Request),
@@ -60,6 +62,10 @@ impl SimpleFlowNode for Node {
                     .read(rust_toolchain)
                     .as_ref()
                     .map(|toolchain| format!("+{toolchain}"));
+                let profile = match profile {
+                    CommonProfile::Release => "release",
+                    CommonProfile::Debug => "dev",
+                };
                 // These crates have mutually exclusive backend features and are
                 // covered by targeted jobs elsewhere.
                 flowey::shell_cmd!(
@@ -75,6 +81,7 @@ impl SimpleFlowNode for Node {
                         --exclude tpm_lib
                         --exclude-features openvmm_hcl_resources/tpm,openvmm_resources/tpm
                         check
+                        --profile {profile}
                     "
                 )
                 .run()?;
