@@ -60,6 +60,8 @@ impl SimpleFlowNode for Node {
                     .read(rust_toolchain)
                     .as_ref()
                     .map(|toolchain| format!("+{toolchain}"));
+                // crypto and the TPMs have to deal with mutually exclusive backend features
+                // Exclude them from this run, they have coverage elsewhere.
                 flowey::shell_cmd!(
                     rt,
                     "cargo {rust_toolchain...}
@@ -68,9 +70,8 @@ impl SimpleFlowNode for Node {
                         --each-feature
                         --locked
                         --keep-going
-                        --exclude crypto
-                        --exclude tpm_device
-                        --exclude tpm_lib
+                        --exclude crypto,tpm_device,tpm_lib
+                        --exclude-features openvmm_hcl_resources/tpm,openvmm_resources/tpm
                         check
                     "
                 )
