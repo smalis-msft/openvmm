@@ -24,6 +24,7 @@ use thiserror::Error;
 pub struct HmacError(#[source] super::BackendError);
 
 /// Compute the HMAC of `data` using `key` and the specified hash algorithm.
+/// Empty keys are rejected.
 // TODO: Consider splitting up into more steps to allow caching of intermediate state.
 pub fn hmac(key: &[u8], data: &[u8], hash_algorithm: HashAlgorithm) -> Result<Vec<u8>, HmacError> {
     sys::hmac(key, data, hash_algorithm)
@@ -140,7 +141,15 @@ mod tests {
 
     #[test]
     fn empty_key_errors_are_propagated() {
-        assert!(hmac(&[], b"message", HashAlgorithm::Sha256).is_err());
-        assert!(verify(&[], b"message", &[0; 32], HashAlgorithm::Sha256).is_err());
+        for algorithm in [
+            HashAlgorithm::Sha1,
+            HashAlgorithm::Sha256,
+            HashAlgorithm::Sha384,
+            HashAlgorithm::Sha512,
+        ] {
+            let tag = hmac(b"key", b"message", algorithm).unwrap();
+            assert!(hmac(&[], b"message", algorithm).is_err());
+            assert!(verify(&[], b"message", &tag, algorithm).is_err());
+        }
     }
 }

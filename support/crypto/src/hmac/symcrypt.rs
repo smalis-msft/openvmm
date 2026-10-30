@@ -16,6 +16,10 @@ fn err(e: SymCryptError, op: &'static str) -> HmacError {
 }
 
 pub fn hmac(key: &[u8], data: &[u8], hash_algorithm: HashAlgorithm) -> Result<Vec<u8>, HmacError> {
+    if key.is_empty() {
+        return Err(err(SymCryptError::InvalidArgument, "computing the HMAC"));
+    }
+
     #[expect(deprecated)]
     let output = match hash_algorithm {
         HashAlgorithm::Sha1 => hmac_sha1(key, data).map(|h| h.to_vec()),
