@@ -175,7 +175,7 @@ pub unsafe fn try_write_bytes<T>(dest: *mut T, val: u8, count: usize) -> Result<
 /// swap failed, or `Err(MemoryError::AccessViolation)` if the swap could not be
 /// attempted due to an access violation.
 ///
-/// Fails at compile time if the size is not 1, 2, 4, or 8 bytes, or if the type
+/// Fails at compile time if the size is not 1, 2, 4, 8, or 16 bytes, or if the type
 /// is under-aligned.
 ///
 /// # Safety
@@ -187,7 +187,7 @@ pub unsafe fn try_compare_exchange<T: Copy>(
     new: T,
 ) -> Result<Result<T, T>, MemoryError> {
     const {
-        assert!(matches!(size_of::<T>(), 1 | 2 | 4 | 8));
+        assert!(matches!(size_of::<T>(), 1 | 2 | 4 | 8 | 16));
         // This `T` must be at least as aligned as the primitive type's natural
         // alignment (which is its size).
         assert!(align_of::<T>() >= size_of::<T>());
@@ -214,6 +214,11 @@ pub unsafe fn try_compare_exchange<T: Copy>(
                 dest.cast(),
                 std::mem::transmute::<&mut T, &mut u64>(&mut current),
                 std::mem::transmute_copy::<T, u64>(&new),
+            ),
+            16 => try_cmpxchg128(
+                dest.cast(),
+                std::mem::transmute::<&mut T, &mut u128>(&mut current),
+                std::mem::transmute_copy::<T, u128>(&new),
             ),
             _ => unreachable!(),
         }
@@ -1108,6 +1113,9 @@ mod tests {
             let atomic = try_compare_exchange(guard.cast::<u64>(), 0, 1).unwrap_err();
             assert_eq!(atomic.offset(), 0);
             assert!(atomic.is_write);
+            let atomic = try_compare_exchange(guard.cast::<u128>(), 0, 1).unwrap_err();
+            assert_eq!(atomic.offset(), 0);
+            assert!(atomic.is_write);
         }
     }
 
@@ -1158,6 +1166,16 @@ mod tests {
         check(0x1234u16, 0x5678, 0x9abc);
         check(0x12345678u32, 0x9abcdef0, 0x01234567);
         check(0x0123456789abcdefu64, 0xfedcba9876543210, 0);
+        check(
+            0x0123456789abcdef_fedcba9876543210u128,
+            0x1122334455667788_99aabbccddeeff00,
+            0x1122334455667788_99aabbccddeeff01,
+        );
+        check(
+            0x0123456789abcdef_fedcba9876543210u128,
+            0x1122334455667788_99aabbccddeeff00,
+            0x1122334455667789_99aabbccddeeff00,
+        );
     }
 
     #[derive(Copy, Clone, Debug)]
